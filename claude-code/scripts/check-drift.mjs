@@ -10,7 +10,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { fail, readConfig, parsePinComment } from './compile-stack.mjs';
+import { fail, readConfig, parsePinComment, parseLiveComment } from './compile-stack.mjs';
 
 function parseArgs(argv) {
   const args = { dir: '.claude/skills', apiBase: null, token: null };
@@ -92,38 +92,48 @@ async function main() {
 
   let staleCount = 0;
   let unknownCount = 0;
+  let liveCount = 0;
 
   for (const { skillDir, skillPath } of skills) {
     const contents = readFileSync(skillPath, 'utf8');
     const pin = parsePinComment(contents);
 
-    if (!pin) {
-      console.log(`  ? ${skillDir} — no bindry:pin comment found, can't check (not compiled by /bindry-sync?)`);
-      unknownCount++;
+    if (pin) {
+      const current = currentByBindingId.get(pin.binding);
+      if (!current) {
+        console.log(`  ? ${skillDir} — its Binding is no longer part of Stack ${pin.stack} (removed, or this project is synced to a different Stack now)`);
+        unknownCount++;
+      } else if (current.pinnedVersion === pin.version) {
+        console.log(`  = ${skillDir} — up to date (${pin.version})`);
+      } else {
+        console.log(`  ! ${skillDir} — stale: compiled at ${pin.version}, Stack now pins ${current.pinnedVersion}`);
+        staleCount++;
+      }
       continue;
     }
 
-    const current = currentByBindingId.get(pin.binding);
-    if (!current) {
-      console.log(`  ? ${skillDir} — its Binding is no longer part of Stack ${pin.stack} (removed, or this project is synced to a different Stack now)`);
-      unknownCount++;
+    const live = parseLiveComment(contents);
+    if (live) {
+      if (!currentByBindingId.has(live.binding)) {
+        console.log(`  ? ${skillDir} — its Binding is no longer part of Stack ${live.stack} (removed, or this project is synced to a different Stack now)`);
+        unknownCount++;
+      } else {
+        console.log(`  ~ ${skillDir} — live (always current, calls the MCP server directly)`);
+        liveCount++;
+      }
       continue;
     }
 
-    if (current.pinnedVersion === pin.version) {
-      console.log(`  = ${skillDir} — up to date (${pin.version})`);
-    } else {
-      console.log(`  ! ${skillDir} — stale: compiled at ${pin.version}, Stack now pins ${current.pinnedVersion}`);
-      staleCount++;
-    }
+    console.log(`  ? ${skillDir} — no bindry:pin or bindry:live comment found, can't check (not compiled by /bindry-sync?)`);
+    unknownCount++;
   }
 
-  const upToDateCount = skills.length - staleCount - unknownCount;
+  const upToDateCount = skills.length - staleCount - unknownCount - liveCount;
   console.log('');
-  if (staleCount === 0 && unknownCount === 0) {
+  if (staleCount === 0 && unknownCount === 0 && liveCount === 0) {
     console.log(`bindry: all ${skills.length} skill(s) are up to date.`);
   } else {
-    console.log(`bindry: ${upToDateCount} up to date, ${staleCount} stale, ${unknownCount} unknown, out of ${skills.length} skill(s).`);
+    console.log(`bindry: ${upToDateCount} up to date, ${staleCount} stale, ${liveCount} live, ${unknownCount} unknown, out of ${skills.length} skill(s).`);
     if (staleCount > 0) console.log('bindry: run /bindry-sync to update the stale skill(s).');
   }
 }

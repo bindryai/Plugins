@@ -58,10 +58,35 @@ or, for the fastest way to try just the command without the plugin system, copy 
 
 Run `/bindry-check` any time — it reads the pin comment back out of every compiled `SKILL.md` and compares it
 against the Stack's *current* pinned version for that Binding (a plain `GET /api/stacks/{id}`, not a full
-export), reporting each skill as up to date, stale (naming both version strings), or unknown (no pin comment,
-or the Binding was removed from the Stack). It's read-only — it never edits anything or re-syncs for you; run
-`/bindry-sync` yourself once it tells you what's stale. It reuses the Stack id/API base from `bindry.config.json`
-just like `/bindry-sync` does, so it needs at least one prior sync to know what to check.
+export), reporting each skill as up to date, stale (naming both version strings), live (see below), or unknown
+(no pin comment, or the Binding was removed from the Stack). It's read-only — it never edits anything or
+re-syncs for you; run `/bindry-sync` yourself once it tells you what's stale. It reuses the Stack id/API base
+from `bindry.config.json` just like `/bindry-sync` does, so it needs at least one prior sync to know what to check.
+
+## Live mode
+
+By default `/bindry-sync` compiles a **pinned** snapshot — a skill's instructions are copied in at compile
+time and go stale until you re-sync. Add `--mode live` to compile a **live** skill instead: its body carries no
+instructions at all, just a pointer telling the agent to call the Bindry MCP server's `bindry.bindings.get`
+tool for this Binding's current content every time it's used. A live skill never goes stale — there's nothing
+`/bindry-check` needs to flag, so it reports these as "live (always current)."
+
+Live mode needs a one-time connection to the Bindry MCP server, separate from `/bindry-sync`'s own token — run
+`/bindry-connect` once per machine. That token also needs the **`mcp` tool scope** granted specifically
+(Bindry → Account settings → API keys), which is a different grant than the scope a pinned-mode token needs.
+
+```bash
+node scripts/compile-stack.mjs <stack-id> --api-base http://localhost:5160 --token <api-key> --mode live --out .claude/skills
+```
+
+Verified live: compiled a real Stack in `--mode live` and confirmed the output skill's frontmatter `description`
+matched what pinned mode would have produced (skills still trigger the same way — only the body differs), with
+no instructions/constraints/verification text embedded and a `bindry:live` comment carrying the real Binding
+GUID. Called `bindry.bindings.get` for that Binding through a real MCP client, then edited the Binding's
+instructions in the running API and called it again — confirmed the tool returned the new text immediately,
+while the compiled file on disk had nothing to go stale in the first place. Also confirmed `/bindry-check`
+correctly reports a live skill as "live (always current)" alongside a stale pinned one in the same directory,
+and correctly flips a live skill to "unknown" once its Binding is removed from the Stack.
 
 ## Try it right now, without Claude Code
 
@@ -106,3 +131,9 @@ reported as unknown rather than crashing or being silently skipped.
   workspace-binding work described on the `BIN-008` card in `Bindry-API` — not built yet.
 - `/bindry-check` reports "compiled at X, Stack now pins Y," not "N versions behind" — the API doesn't expose a
   Binding's full version history today, only its current pinned version, so there's nothing to count against.
+- `--mode live` requires real GUID Binding ids from a live-fetched Stack. The bundled `examples/*.stack.json`
+  files use illustrative ids (e.g. `bnd_git_branch_pr_hygiene`) for readability, not real GUIDs, so they can't
+  be compiled live — those Bindings are skipped with a warning rather than producing a skill that would always
+  fail when an agent tries to use it.
+- Attachments are still downloaded and pinned to disk at compile time even in live mode — `bindry.bindings.get`
+  returns a Binding's text content only, not its file attachments, so there's no live path for binary assets yet.

@@ -6,16 +6,22 @@
 //
 // Usage:
 //   node compile-stack.mjs <stack-export.json> [--out <dir>]
-//   node compile-stack.mjs <stack-id-guid> --api-base <url> [--token <api-key>] [--out <dir>]
-//   node compile-stack.mjs --api-base <url> [--token <api-key>]   (reuses bindry.config.json)
+//   node compile-stack.mjs <stack-id-guid> --api-base <url> [--token <api-key>] [--out <dir>] [--mode pinned|live]
+//   node compile-stack.mjs --api-base <url> [--token <api-key>]   (reuses bindry.config.json, incl. --mode)
+//
+// --mode live compiles a pointer skill per Binding that calls the Bindry MCP tools for current
+// content at run time, instead of embedding a snapshot. Requires the Bindry MCP server to be
+// connected separately — see commands/bindry-connect.md. Default is --mode pinned (unchanged
+// snapshot behavior); the mode is remembered in bindry.config.json like the Stack id and API base.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const CONFIG_FILE = 'bindry.config.json';
-const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PIN_PATTERN = /<!--\s*bindry:pin\s+stack=(\S+)\s+binding=(\S+)\s+version=(\S+)\s*-->/;
+const LIVE_PATTERN = /<!--\s*bindry:live\s+stack=(\S+)\s+binding=(\S+)\s*-->/;
 
 // Shared with check-drift.mjs, which parses this same line back out of a compiled SKILL.md
 // rather than re-implementing the pin format.
@@ -28,13 +34,26 @@ export function parsePinComment(contents) {
   return match ? { stack: match[1], binding: match[2], version: match[3] } : null;
 }
 
+// A live-compiled skill has no version to pin — it always calls the MCP server for current
+// content — so it carries this sibling marker instead. Kept separate from renderPinComment
+// rather than merged so the already-tested pinned-mode format/output stays untouched.
+export function renderLiveComment(stack, binding) {
+  return `<!-- bindry:live stack=${stack.slug} binding=${binding.id} -->`;
+}
+
+export function parseLiveComment(contents) {
+  const match = LIVE_PATTERN.exec(contents);
+  return match ? { stack: match[1], binding: match[2] } : null;
+}
+
 export function parseArgs(argv) {
-  const args = { input: null, out: '.claude/skills', apiBase: null, token: null, target: 'SkillBundle' };
+  const args = { input: null, out: '.claude/skills', apiBase: null, token: null, target: 'SkillBundle', mode: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') args.out = argv[++i];
     else if (argv[i] === '--api-base') args.apiBase = argv[++i];
     else if (argv[i] === '--token') args.token = argv[++i];
     else if (argv[i] === '--target') args.target = argv[++i];
+    else if (argv[i] === '--mode') args.mode = argv[++i];
     else if (!args.input) args.input = argv[i];
   }
   if (!args.token) args.token = process.env.BINDRY_API_TOKEN ?? null;
@@ -60,33 +79,49 @@ function describeSkill(binding) {
   return `${binding.title}. Use when: ${trigger}.`;
 }
 
-function renderSkill(stack, binding, assets) {
+function renderSkill(stack, binding, assets, mode) {
   const lines = [];
   lines.push('---');
   lines.push(`name: ${slugify(binding.slug ?? binding.title)}`);
   lines.push(`description: ${describeSkill(binding).replace(/"/g, "'")}`);
   lines.push('---');
   lines.push('');
-  lines.push(renderPinComment(stack, binding));
-  lines.push('');
-  lines.push(binding.instructions.trim());
 
-  if (binding.doesNotApplyWhen?.length) {
+  if (mode === 'live') {
+    lines.push(renderLiveComment(stack, binding));
     lines.push('');
-    lines.push('Does not apply when:');
-    for (const item of binding.doesNotApplyWhen) lines.push(`- ${item}`);
-  }
+    lines.push(
+      'This skill is compiled in **live** mode — its instructions are not stored locally. Before proceeding, ' +
+      `call the \`bindry.bindings.get\` MCP tool with \`{"bindingId": "${binding.id}"}\` and follow the ` +
+      '`instructions`, `constraints`, and `verificationChecklist` it returns. Treat this file as a pointer only.'
+    );
+    lines.push('');
+    lines.push(
+      'If the tool call fails (not connected, network, auth/scope error), say so plainly and stop — do not ' +
+      'guess. If the Bindry MCP server isn\'t connected yet, run `/bindry-connect` first.'
+    );
+  } else {
+    lines.push(renderPinComment(stack, binding));
+    lines.push('');
+    lines.push(binding.instructions.trim());
 
-  if (binding.constraints?.length) {
-    lines.push('');
-    lines.push('Constraints:');
-    for (const item of binding.constraints) lines.push(`- ${item}`);
-  }
+    if (binding.doesNotApplyWhen?.length) {
+      lines.push('');
+      lines.push('Does not apply when:');
+      for (const item of binding.doesNotApplyWhen) lines.push(`- ${item}`);
+    }
 
-  if (binding.verification?.length) {
-    lines.push('');
-    lines.push('Verify before finishing:');
-    for (const item of binding.verification) lines.push(`- ${item}`);
+    if (binding.constraints?.length) {
+      lines.push('');
+      lines.push('Constraints:');
+      for (const item of binding.constraints) lines.push(`- ${item}`);
+    }
+
+    if (binding.verification?.length) {
+      lines.push('');
+      lines.push('Verify before finishing:');
+      for (const item of binding.verification) lines.push(`- ${item}`);
+    }
   }
 
   if (assets?.length) {
@@ -219,7 +254,7 @@ function loadLocalFile(inputPath) {
   }
 }
 
-async function resolveStack(args) {
+async function resolveStack(args, mode) {
   // Explicit local file path (existing behavior — anything that isn't a bare GUID or URL).
   if (args.input && !GUID_PATTERN.test(args.input) && !/^https?:\/\//i.test(args.input)) {
     return { stack: loadLocalFile(resolve(process.cwd(), args.input)), synced: null };
@@ -250,12 +285,17 @@ async function resolveStack(args) {
   }
 
   const stack = await fetchLive(stackId, apiBase, args.token, args.target);
-  return { stack, synced: { stackId, apiBase } };
+  return { stack, synced: { stackId, apiBase, mode } };
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const { stack, synced } = await resolveStack(args);
+  const mode = args.mode ?? readConfig()?.mode ?? 'pinned';
+  if (mode !== 'pinned' && mode !== 'live') {
+    fail(`--mode must be "pinned" or "live", got "${mode}".`);
+  }
+
+  const { stack, synced } = await resolveStack(args, mode);
 
   if (!stack.slug || !Array.isArray(stack.bindings) || stack.bindings.length === 0) {
     fail('the resolved Stack export is missing "slug" or a non-empty "bindings" array — is this a Bindry Stack export?');
@@ -269,11 +309,18 @@ async function main() {
       console.warn(`bindry: skipping a binding missing "slug" or "instructions" in ${stack.slug}`);
       continue;
     }
+    if (mode === 'live' && !GUID_PATTERN.test(binding.id ?? '')) {
+      console.warn(
+        `bindry: skipping "${binding.title}" in live mode — its id ("${binding.id}") isn't a GUID, so ` +
+        `bindry.bindings.get would never be able to look it up at agent run-time.`
+      );
+      continue;
+    }
     const skillDir = join(outDir, slugify(binding.slug));
     mkdirSync(skillDir, { recursive: true });
     const assets = await downloadAssets(binding, skillDir, args);
     const skillPath = join(skillDir, 'SKILL.md');
-    writeFileSync(skillPath, renderSkill(stack, binding, assets), 'utf8');
+    writeFileSync(skillPath, renderSkill(stack, binding, assets, mode), 'utf8');
     written.push({ title: binding.title, path: skillPath });
   }
 

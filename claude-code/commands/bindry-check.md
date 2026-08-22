@@ -13,10 +13,12 @@ they came from. This is read-only — it never edits, deletes, or re-syncs a ski
    the `BINDRY_API_TOKEN` environment variable — same requirement as `/bindry-sync`.
 3. Run: `node "${CLAUDE_PLUGIN_ROOT}/scripts/check-drift.mjs" [--dir .claude/skills] [--api-base <url>] [--token <api-key>]`
 4. Report exactly what it printed: which skills are up to date, which are stale (and at what version each side
-   is), and which it couldn't check (no pin comment, e.g. a hand-authored skill, or a Binding no longer in the
-   Stack). If it failed with an authentication error, say so plainly rather than retry or guess.
+   is), which are **live** (compiled with `--mode live` — always current by design, calls the MCP server
+   directly, never goes stale), and which it couldn't check (no pin or live comment, e.g. a hand-authored
+   skill, or a Binding no longer in the Stack). If it failed with an authentication error, say so plainly
+   rather than retry or guess.
 5. If anything is stale, tell the user to run `/bindry-sync` to update it — this command never does that for
-   them.
+   them. Live skills never need this — don't suggest re-syncing them just because they showed up in the report.
 
 Note on "how far behind": the API doesn't expose full version history for a Binding today, only its current
 pinned version, so the report names the two version strings on each side (e.g. "compiled at 1.0.0, Stack now
