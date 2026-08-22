@@ -1,0 +1,8 @@
+# Written by compile-stack.mjs when syncing a Stack live — remembers which Stack/API a project
+# is synced to. Per-project runtime state, not something the plugin repo itself should track.
+bindry.config.json
+
+# Compiled skill output from testing a sync locally inside this repo.
+.claude/skills/
+
+node_modules/

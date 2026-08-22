@@ -1,0 +1,12 @@
+{
+  "name": "bindry",
+  "version": "0.1.0",
+  "description": "Compile a bound Bindry Stack into Codex skills, so instructions load only when they're relevant instead of sitting in every prompt.",
+  "skills": "./skills/",
+  "author": {
+    "name": "Bindry",
+    "url": "https://bindry.ai"
+  },
+  "homepage": "https://bindry.ai/plugins/codex",
+  "keywords": ["bindry", "instructions", "skills", "guardrails"]
+}

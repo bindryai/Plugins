@@ -1,0 +1,15 @@
+{
+  "name": "bindry-plugins",
+  "owner": {
+    "name": "Bindry",
+    "url": "https://bindry.ai"
+  },
+  "description": "Bindry's Claude Code plugin marketplace",
+  "plugins": [
+    {
+      "name": "bindry",
+      "source": "./",
+      "description": "Compile a bound Bindry Stack into Claude Code skills, so instructions load only when they're relevant."
+    }
+  ]
+}
