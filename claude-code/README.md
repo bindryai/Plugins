@@ -20,17 +20,18 @@ referencing that local copy — so Claude Code can point at (or embed) the exact
 
 ## Install
 
-This plugin isn't published to a public host yet — try it locally. This directory is both the plugin *and*
-its own marketplace (`.claude-plugin/marketplace.json` lists the plugin at `source: "./"`), so pointing
-`marketplace add` at it is enough:
-
 ```bash
-claude plugin marketplace add /path/to/Bindry.Plugins/claude-code
+claude plugin marketplace add MedPACTech/Bindry.Plugins
 claude plugin install bindry@bindry-plugins
 ```
 
-Verified working end-to-end on Claude Code v2.1.238: `claude plugin validate .` passes, both commands above
-complete successfully, and `claude plugin list` shows `bindry@bindry-plugins` as installed and enabled.
+The marketplace manifest lives at the repo root (`Bindry.Plugins/.claude-plugin/marketplace.json`), listing
+this plugin at `source: "./claude-code"` — that's why `marketplace add` points at the whole repo, not this
+subdirectory. Verified working end-to-end on Claude Code v2.1.238 against the real pushed repo: both commands
+above complete successfully and `claude plugin list` shows `bindry@bindry-plugins` as installed and enabled.
+
+To try a local checkout instead of the published repo, point `marketplace add` at the repo root on disk
+(`/path/to/Bindry.Plugins`, not this `claude-code` subdirectory) — same two commands otherwise.
 
 or, for the fastest way to try just the command without the plugin system, copy `commands/bindry-sync.md` and
 `scripts/compile-stack.mjs` straight into a project's `.claude/commands/` and `.claude/scripts/` (adjust the

@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "bindry",
-      "source": "./",
+      "source": "./claude-code",
       "description": "Compile a bound Bindry Stack into Claude Code skills, so instructions load only when they're relevant."
     }
   ]
