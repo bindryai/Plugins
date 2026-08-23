@@ -1,12 +1,12 @@
 {
   "name": "bindry",
-  "version": "0.1.0",
-  "description": "Compile a bound Bindry Stack into Codex skills, so instructions load only when they're relevant instead of sitting in every prompt.",
+  "version": "0.2.0",
+  "description": "Compile a bound Bindry Stack into Codex skills, so instructions load only when they're relevant instead of sitting in every prompt. Supports pinned (compiled snapshot) or live (always current via MCP) per Stack.",
   "skills": "./skills/",
   "author": {
     "name": "Bindry",
     "url": "https://bindry.ai"
   },
   "homepage": "https://bindry.ai/plugins/codex",
-  "keywords": ["bindry", "instructions", "skills", "guardrails"]
+  "keywords": ["bindry", "instructions", "skills", "guardrails", "mcp", "live"]
 }

@@ -1,0 +1,14 @@
+{
+  "name": "bindry-plugins",
+  "owner": {
+    "name": "Bindry",
+    "url": "https://bindry.ai"
+  },
+  "plugins": [
+    {
+      "name": "bindry",
+      "source": "./",
+      "description": "Compile a bound Bindry Stack into Codex skills, so instructions load only when they're relevant."
+    }
+  ]
+}
