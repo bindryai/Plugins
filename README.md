@@ -14,7 +14,7 @@ Claude Code and Codex ship a pinned (compiled snapshot) and a live (always curre
 install — the user picks per Stack.
 
 The Claude Code marketplace manifest lives at this repo's root (`.claude-plugin/marketplace.json`), pointing
-at `./claude-code` — that's why installing it is `claude plugin marketplace add MedPACTech/Bindry.Plugins`,
+at `./claude-code` — that's why installing it is `claude plugin marketplace add bindryai/Plugins`,
 not a path into the subdirectory. See [claude-code/README.md](claude-code/README.md) for the full install steps.
 
 ## Development
