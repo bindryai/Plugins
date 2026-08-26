@@ -21,7 +21,7 @@ referencing that local copy — so Claude Code can point at (or embed) the exact
 ## Install
 
 ```bash
-claude plugin marketplace add MedPACTech/Bindry.Plugins
+claude plugin marketplace add bindryai/Plugins
 claude plugin install bindry@bindry-plugins
 ```
 
