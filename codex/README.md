@@ -7,7 +7,7 @@ in this repo, ported to Codex's actual plugin/skill mechanics.
 ## Install
 
 ```bash
-codex plugin marketplace add MedPACTech/Bindry.Plugins
+codex plugin marketplace add bindryai/Plugins
 codex plugin add bindry@bindry-plugins
 ```
 
