@@ -1,13 +1,20 @@
 #!/usr/bin/env node
 // Compiles a Bindry Stack export into one Codex skill per Binding.
-// Reads the export from a local file, a full export URL, a bare Stack GUID (fetched live
-// from --api-base), or — if no source is given — whatever was last synced, remembered in
-// ./bindry.config.json.
+// Reads the export from a local file, a full export URL, a Stack GUID *or marketplace slug*
+// (fetched live from --api-base), or — if no source is given — whatever was last synced,
+// remembered in ./bindry.config.json.
 //
 // Usage:
 //   node compile-stack.mjs <stack-export.json> [--out <dir>]
-//   node compile-stack.mjs <stack-id-guid> --api-base <url> [--token <api-key>] [--out <dir>] [--mode pinned|live]
+//   node compile-stack.mjs <stack-id-or-slug> --api-base <url> [--token <api-key>] [--out <dir>] [--mode pinned|live]
 //   node compile-stack.mjs --api-base <url> [--token <api-key>]   (reuses bindry.config.json, incl. --mode)
+//
+// Two kinds of Stack resolve here. Your own (workspace-scoped, may be private) needs --token and comes
+// from /api/stacks/{guid}/export/file. Someone else's published Stack needs no token at all and comes
+// from /api/public/catalog/stacks/{slug-or-guid}/export/file — that public route is what makes installing
+// a Stack from the marketplace possible without owning the workspace that wrote it. A token is tried
+// first when present, then the public route: a key scoped to your own workspace must not stop you
+// installing a public Stack.
 //
 // --mode live compiles a pointer skill per Binding that calls the Bindry MCP tools for current
 // content at run time, instead of embedding a snapshot. Requires the Bindry MCP server to be
@@ -218,37 +225,87 @@ function writeConfig(config) {
   return configPath;
 }
 
-async function fetchLive(stackId, apiBase, token, target) {
-  const url = `${apiBase.replace(/\/$/, '')}/api/stacks/${stackId}/export/file?target=${encodeURIComponent(target)}`;
-  const headers = {};
-  if (token) headers['X-Api-Key'] = token;
+function workspaceExportUrl(apiBase, stackId, target) {
+  return `${apiBase.replace(/\/$/, '')}/api/stacks/${stackId}/export/file?target=${encodeURIComponent(target)}`;
+}
 
-  let response;
+function publicExportUrl(apiBase, slugOrId, target) {
+  const base = apiBase.replace(/\/$/, '');
+  return `${base}/api/public/catalog/stacks/${encodeURIComponent(slugOrId)}/export/file?target=${encodeURIComponent(target)}`;
+}
+
+async function requestExport(url, token) {
   try {
-    response = await fetch(url, { headers });
+    return await fetch(url, token ? { headers: { 'X-Api-Key': token } } : {});
   } catch (err) {
-    fail(`could not reach ${apiBase} (${err.message}). Is the Bindry API running and reachable?`);
+    fail(`could not reach ${url} (${err.message}). Is the Bindry API running and reachable?`);
   }
+}
 
-  if (response.status === 401 || response.status === 403) {
-    fail(
-      `authentication failed (${response.status}) fetching ${url}. ` +
-      `Pass --token <api-key> (generate one from Bindry → Account settings → API keys), ` +
-      `or set the BINDRY_API_TOKEN environment variable. This Stack may be private.`
-    );
-  }
-  if (response.status === 404) {
-    fail(`Stack ${stackId} was not found at ${apiBase} — check the Stack id and that it belongs to your workspace.`);
-  }
-  if (!response.ok) {
-    fail(`export request failed: ${response.status} ${response.statusText} (${url})`);
-  }
-
+async function readExportJson(response, url) {
   try {
     return await response.json();
   } catch (err) {
     fail(`response from ${url} was not valid JSON (${err.message}). Is --target set to a JSON-producing target?`);
   }
+}
+
+// Resolves a Stack by GUID or marketplace slug. The workspace route is only attempted for a GUID with a
+// token — it cannot serve a slug, and without a token it can only ever 401. Anything it declines
+// (401/403/404) falls through to the public catalog, so "I have a key for my own workspace" never becomes
+// "I can't install a public Stack".
+async function fetchLive(slugOrId, apiBase, token, target) {
+  const isGuid = GUID_PATTERN.test(slugOrId);
+  let workspaceStatus = null;
+
+  if (token && isGuid) {
+    const url = workspaceExportUrl(apiBase, slugOrId, target);
+    const response = await requestExport(url, token);
+    if (response.ok) return readExportJson(response, url);
+    if (response.status !== 401 && response.status !== 403 && response.status !== 404) {
+      fail(`export request failed: ${response.status} ${response.statusText} (${url})`);
+    }
+    workspaceStatus = response.status;
+  }
+
+  const publicUrl = publicExportUrl(apiBase, slugOrId, target);
+  const publicResponse = await requestExport(publicUrl, null);
+  if (publicResponse.ok) return readExportJson(publicResponse, publicUrl);
+
+  if (publicResponse.status === 404) {
+    if (workspaceStatus === 401 || workspaceStatus === 403) {
+      fail(
+        `authentication failed (${workspaceStatus}) for Stack ${slugOrId} in your workspace, and it is not ` +
+        `published to the public catalog either. Check --token (generate one from Bindry → Account settings ` +
+        `→ API keys, with the Exports permission), or set BINDRY_API_TOKEN.`
+      );
+    }
+    fail(
+      token || !isGuid
+        ? `Stack "${slugOrId}" was not found at ${apiBase}. A public Stack must be Published with Public ` +
+          `visibility to be installable; a private one needs --token.`
+        : `Stack "${slugOrId}" is not in the public catalog at ${apiBase}. If it's your own private Stack, ` +
+          `pass --token <api-key> (or set BINDRY_API_TOKEN).`
+    );
+  }
+  if (publicResponse.status === 401 || publicResponse.status === 403) {
+    fail(
+      `authentication failed (${publicResponse.status}) fetching ${publicUrl}. ` +
+      `Pass --token <api-key> (generate one from Bindry → Account settings → API keys), ` +
+      `or set the BINDRY_API_TOKEN environment variable. This Stack may be private.`
+    );
+  }
+  fail(`export request failed: ${publicResponse.status} ${publicResponse.statusText} (${publicUrl})`);
+}
+
+// A path, not an identifier: has a separator, ends in .json, or names a file that actually exists.
+// Anything else is treated as a Stack GUID or marketplace slug.
+export function looksLikeLocalFile(input) {
+  return (
+    /[\\/]/.test(input) ||
+    input.toLowerCase().endsWith('.json') ||
+    existsSync(resolve(process.cwd(), input))
+  );
 }
 
 function loadLocalFile(inputPath) {
@@ -263,8 +320,10 @@ function loadLocalFile(inputPath) {
 }
 
 async function resolveStack(args, mode) {
-  // Explicit local file path (existing behavior — anything that isn't a bare GUID or URL).
-  if (args.input && !GUID_PATTERN.test(args.input) && !/^https?:\/\//i.test(args.input)) {
+  // Explicit local file path. Deliberately NOT "anything that isn't a GUID" any more: a marketplace slug
+  // like `git-flow-command-center` is a perfectly good Stack identifier, and the old rule would have tried
+  // to open it as a file and failed with a confusing "no such file".
+  if (args.input && !/^https?:\/\//i.test(args.input) && looksLikeLocalFile(args.input)) {
     return { stack: loadLocalFile(resolve(process.cwd(), args.input)), synced: null };
   }
 
@@ -275,21 +334,21 @@ async function resolveStack(args, mode) {
     return { stack: await response.json(), synced: null };
   }
 
-  // Bare Stack GUID or no input at all (falls back to the remembered config).
+  // Bare Stack GUID or marketplace slug, or no input at all (falls back to the remembered config).
   let stackId = args.input;
   let apiBase = args.apiBase;
   if (!stackId) {
     const config = readConfig();
     if (!config?.stackId) {
       fail(
-        'no source given and no bindry.config.json found. Usage: node compile-stack.mjs <stack-export.json | stack-id> --api-base <url> [--token <api-key>]'
+        'no source given and no bindry.config.json found. Usage: node compile-stack.mjs <stack-export.json | stack-id-or-slug> --api-base <url> [--token <api-key>]'
       );
     }
     stackId = config.stackId;
     apiBase = apiBase ?? config.apiBase;
   }
   if (!apiBase) {
-    fail('--api-base is required when syncing a Stack id (e.g. --api-base http://localhost:5160).');
+    fail('--api-base is required when syncing a Stack id or slug (e.g. --api-base http://localhost:5160).');
   }
 
   const stack = await fetchLive(stackId, apiBase, args.token, args.target);
