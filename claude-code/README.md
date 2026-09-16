@@ -41,9 +41,11 @@ or, for the fastest way to try just the command without the plugin system, copy 
 
 **Live sync (the real path):**
 
-1. Generate an API key from Bindry → Account settings → API keys, ticking at least **Exports** (and
-   **Bindings**/**Stacks** for a full sync). Only needed for your own private Stacks — a published Stack from
-   the marketplace needs no key at all, see "Installing someone else's Stack" below.
+1. Generate an API key from the workspace's team page in Bindry (not Account settings — a key is scoped to
+   whichever workspace's team page you made it from). Name it, optionally set an expiry, and you're done —
+   there's no permission picker; a key already does everything you can do in that workspace. Only needed for
+   your own private Stacks — a published Stack from the marketplace needs no key at all, see "Installing
+   someone else's Stack" below.
 2. Run `/bindry-sync <stack-id> --api-base http://localhost:5160 --token <api-key>` once. It writes
    `bindry.config.json` in the project root remembering the Stack id and API base.
 3. Re-run `/bindry-sync` any time the Stack changes — no arguments needed the second time, it reuses
@@ -72,10 +74,8 @@ instructions at all, just a pointer telling the agent to call the Bindry MCP ser
 tool for this Binding's current content every time it's used. A live skill never goes stale — there's nothing
 `/bindry-check` needs to flag, so it reports these as "live (always current)."
 
-Live mode needs a one-time connection to the Bindry MCP server, separate from `/bindry-sync`'s own token — run
-`/bindry-connect` once per machine. That token also needs the **MCP tools** permission, ticked when you
-generate the key (Bindry → Account settings → API keys) — a different grant than the **Exports** permission a
-pinned-mode token needs.
+Live mode needs a one-time connection to the Bindry MCP server — run `/bindry-connect` once per machine. The
+same key `/bindry-sync` already uses works here too; there's no separate permission to grant for MCP access.
 
 ```bash
 node scripts/compile-stack.mjs <stack-id> --api-base http://localhost:5160 --token <api-key> --mode live --out .claude/skills

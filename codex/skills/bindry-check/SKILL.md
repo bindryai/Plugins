@@ -10,8 +10,8 @@ Invoke explicitly with `$bindry-check`, or let it trigger automatically when the
 1. This needs `bindry.config.json` in the project root (written by a previous sync) to know which Stack and API
    base to check against. If it's missing, tell the user to use the `bindry-sync` skill at least once first,
    then stop.
-2. For a private Stack, also need `--token <api-key>` (generated from Bindry → Account settings → API keys) or
-   the `BINDRY_API_TOKEN` environment variable — same requirement as `bindry-sync`.
+2. For a private Stack, also need `--token <api-key>` (generated from the workspace's team page in Bindry, not
+   Account settings) or the `BINDRY_API_TOKEN` environment variable — same requirement as `bindry-sync`.
 3. Locate this plugin's own installed root first (e.g. list installed Codex plugins and find the path for
    `bindry@<marketplace>`), then run:
    `node <resolved-plugin-root>/scripts/check-drift.mjs [--dir .agents/skills] [--api-base <url>] [--token <api-key>]`
