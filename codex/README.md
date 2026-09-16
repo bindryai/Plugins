@@ -51,7 +51,7 @@ pinned-only installer who hasn't set up an API key.
 codex mcp add bindry --url <api-base>/api/mcp --bearer-token-env-var BINDRY_API_TOKEN
 ```
 
-The token needs the **`mcp` tool scope** granted specifically (Bindry → Account settings → API keys) — a
+The token needs the **MCP tools** permission, ticked when you generate the key (Bindry → Account settings → API keys) — a
 different grant than a pinned-mode sync token. Verified live end-to-end: registered a real API key with the
 `mcp` scope this way against a real running Bindry API, confirmed `codex mcp get bindry` reports it enabled,
 and confirmed (via a real independent MCP client) that `Authorization: Bearer <key>` against `/api/mcp` returns

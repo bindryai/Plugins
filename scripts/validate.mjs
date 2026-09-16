@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { codexCompilerInSync } from './sync-codex-compiler.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 let failures = 0;
@@ -132,6 +133,19 @@ for (const dir of readdirSync(join(ROOT, 'codex', 'skills'), { withFileTypes: tr
 for (const platform of ['claude-code', 'codex']) {
   checkSyntax(`${platform}/scripts/compile-stack.mjs`);
   checkSyntax(`${platform}/scripts/check-drift.mjs`);
+}
+
+// --- The two compiler copies must not have drifted ---
+// They're duplicated by necessity (see sync-codex-compiler.mjs), so the thing worth catching is a
+// hand-edit to one that never made it to the other.
+try {
+  if (codexCompilerInSync()) {
+    ok('codex/scripts/compile-stack.mjs is in sync with the Claude Code copy');
+  } else {
+    fail('codex/scripts/compile-stack.mjs has drifted — run: node scripts/sync-codex-compiler.mjs');
+  }
+} catch (err) {
+  fail(err.message);
 }
 
 // --- Compiler regression smoke test, both platforms, both bundled examples ---
