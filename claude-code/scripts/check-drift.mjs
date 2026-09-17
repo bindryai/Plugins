@@ -49,7 +49,7 @@ async function fetchStackDetail(stackId, apiBase, token) {
   if (response.status === 401 || response.status === 403) {
     fail(
       `authentication failed (${response.status}) fetching ${url}. ` +
-      `Pass --token <api-key> (generate one from Bindry → Account settings → API keys), ` +
+      `Pass --token <api-key> (generate one from the workspace's Team page in Bindry), ` +
       `or set the BINDRY_API_TOKEN environment variable.`
     );
   }
