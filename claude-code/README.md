@@ -44,7 +44,7 @@ or, for the fastest way to try just the command without the plugin system, copy 
 1. Generate an API key from the workspace's team page in Bindry (not Account settings — a key is scoped to
    whichever workspace's team page you made it from). Name it, optionally set an expiry, and you're done —
    there's no permission picker; a key already does everything you can do in that workspace. Only needed for
-   your own private Stacks — a published Stack from the marketplace needs no key at all, see "Installing
+   your own private Stacks — a published Stack from the Library needs no key at all, see "Installing
    someone else's Stack" below.
 2. Run `/bindry-sync <stack-id> --api-base http://localhost:5160 --token <api-key>` once. It writes
    `bindry.config.json` in the project root remembering the Stack id and API base.
@@ -128,15 +128,15 @@ reported as unknown rather than crashing or being silently skipped.
 
 ## Installing someone else's Stack
 
-`/bindry-sync` is not limited to Stacks you own. Pass a marketplace **slug** (or the Stack's GUID) with no
-token at all and it resolves through the public catalog:
+`/bindry-sync` is not limited to Stacks you own. Pass a Library **slug** (or the Stack's GUID) with no
+token at all and it resolves through the public Library:
 
 ```bash
 /bindry-sync git-flow-command-center --api-base https://api.bindry.ai
 ```
 
 That works because `GET /api/public/catalog/stacks/{slug-or-guid}/export/file` is anonymous. The listing in
-the public catalog *is* the permission check: a Stack appears there only while it is Published with Public
+the public Library *is* the permission check: a Stack appears there only while it is Published with Public
 visibility and not archived, and drops out the moment any of that stops being true.
 
 When a token *is* present and the identifier is a GUID, the workspace route is tried first and the public
