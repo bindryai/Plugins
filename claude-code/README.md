@@ -41,8 +41,11 @@ or, for the fastest way to try just the command without the plugin system, copy 
 
 **Live sync (the real path):**
 
-1. Generate an API key from Bindry → Account settings → API keys (only needed for your own private Stacks —
-   see the limitation below for what "public" actually means here today).
+1. Generate an API key from the workspace's team page in Bindry (not Account settings — a key is scoped to
+   whichever workspace's team page you made it from). Name it, optionally set an expiry, and you're done —
+   there's no permission picker; a key already does everything you can do in that workspace. Only needed for
+   your own private Stacks — a published Stack from the marketplace needs no key at all, see "Installing
+   someone else's Stack" below.
 2. Run `/bindry-sync <stack-id> --api-base http://localhost:5160 --token <api-key>` once. It writes
    `bindry.config.json` in the project root remembering the Stack id and API base.
 3. Re-run `/bindry-sync` any time the Stack changes — no arguments needed the second time, it reuses
@@ -71,9 +74,8 @@ instructions at all, just a pointer telling the agent to call the Bindry MCP ser
 tool for this Binding's current content every time it's used. A live skill never goes stale — there's nothing
 `/bindry-check` needs to flag, so it reports these as "live (always current)."
 
-Live mode needs a one-time connection to the Bindry MCP server, separate from `/bindry-sync`'s own token — run
-`/bindry-connect` once per machine. That token also needs the **`mcp` tool scope** granted specifically
-(Bindry → Account settings → API keys), which is a different grant than the scope a pinned-mode token needs.
+Live mode needs a one-time connection to the Bindry MCP server — run `/bindry-connect` once per machine. The
+same key `/bindry-sync` already uses works here too; there's no separate permission to grant for MCP access.
 
 ```bash
 node scripts/compile-stack.mjs <stack-id> --api-base http://localhost:5160 --token <api-key> --mode live --out .claude/skills
@@ -124,11 +126,25 @@ and re-pinned the Stack to it, confirmed the drift check then reported the local
 version strings) without touching the file on disk; confirmed a hand-authored `SKILL.md` with no pin comment is
 reported as unknown rather than crashing or being silently skipped.
 
+## Installing someone else's Stack
+
+`/bindry-sync` is not limited to Stacks you own. Pass a marketplace **slug** (or the Stack's GUID) with no
+token at all and it resolves through the public catalog:
+
+```bash
+/bindry-sync git-flow-command-center --api-base https://api.bindry.ai
+```
+
+That works because `GET /api/public/catalog/stacks/{slug-or-guid}/export/file` is anonymous. The listing in
+the public catalog *is* the permission check: a Stack appears there only while it is Published with Public
+visibility and not archived, and drops out the moment any of that stops being true.
+
+When a token *is* present and the identifier is a GUID, the workspace route is tried first and the public
+route is the fallback — so a key scoped to your own workspace never blocks you from installing a public
+Stack. Private Stacks still need `--token`, exactly as before.
+
 ## Current limitations
 
-- `/api/stacks/{id}/export` is workspace-scoped — it's "sync your own Stacks," not "install someone else's
-  published Stack." Cross-tenant install (binding a Stack you don't own into your project) needs the
-  workspace-binding work described on the `BIN-008` card in `Bindry-API` — not built yet.
 - `/bindry-check` reports "compiled at X, Stack now pins Y," not "N versions behind" — the API doesn't expose a
   Binding's full version history today, only its current pinned version, so there's nothing to count against.
 - `--mode live` requires real GUID Binding ids from a live-fetched Stack. The bundled `examples/*.stack.json`

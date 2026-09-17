@@ -1,0 +1,42 @@
+{
+  "stackId": "stk_git_flow_command_center",
+  "slug": "git-flow-command-center",
+  "title": "Git Flow Command Center",
+  "summary": "Branch, commit, review, merge, release — with prompts your agents can run without re-explaining your workflow.",
+  "tokenEstimate": 580,
+  "bindings": [
+    {
+      "id": "bnd_git_branch_pr_hygiene",
+      "slug": "git-branch-and-pr-hygiene",
+      "title": "Branch & PR Hygiene",
+      "version": "3.1.0",
+      "appliesWhen": ["Creating a branch", "Opening or updating a pull request"],
+      "doesNotApplyWhen": ["Hotfix branches created by CI"],
+      "instructions": "Use feature/<ticket>-<slug> branch names. Keep commits scoped to one logical change with an imperative summary line. PR descriptions must include a one-line \"why\" and a manual test note.",
+      "constraints": ["Do not squash commits that mix unrelated changes into one message."],
+      "verification": ["Every PR description has a test plan section before merge."]
+    },
+    {
+      "id": "bnd_release_notes_from_commits",
+      "slug": "release-notes-from-commits",
+      "title": "Release Notes From Commits",
+      "version": "1.4.0",
+      "appliesWhen": ["Preparing a release or tag"],
+      "doesNotApplyWhen": ["Draft/WIP branches"],
+      "instructions": "Group commits by feature, fix, and chore. Only describe behavior actually present in the diff. Flag breaking changes in a separate section at the top.",
+      "constraints": ["Do not summarize a commit message you cannot trace to a diff."],
+      "verification": ["Every bullet references a real commit hash."]
+    },
+    {
+      "id": "bnd_test_first_bug_fix",
+      "slug": "test-first-bug-fix-workflow",
+      "title": "Test-First Bug Fix Workflow",
+      "version": "1.6.0",
+      "appliesWhen": ["Fixing a reported bug or failing test"],
+      "doesNotApplyWhen": ["Greenfield feature work with no failing test yet"],
+      "instructions": "Reproduce the failure with a test before editing code. Write the smallest fix that makes the test pass. Run the full nearby test suite before declaring success, and report failures honestly.",
+      "constraints": ["Do not touch unrelated files while fixing a scoped bug."],
+      "verification": ["Failing test existed before the fix and passes after it."]
+    }
+  ]
+}

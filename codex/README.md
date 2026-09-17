@@ -51,9 +51,9 @@ pinned-only installer who hasn't set up an API key.
 codex mcp add bindry --url <api-base>/api/mcp --bearer-token-env-var BINDRY_API_TOKEN
 ```
 
-The token needs the **`mcp` tool scope** granted specifically (Bindry → Account settings → API keys) — a
-different grant than a pinned-mode sync token. Verified live end-to-end: registered a real API key with the
-`mcp` scope this way against a real running Bindry API, confirmed `codex mcp get bindry` reports it enabled,
+Any key generated from the workspace's team page in Bindry works here — there's no separate permission to
+grant for MCP access, and no separate token needed from pinned-mode sync. Verified live end-to-end: registered
+a real API key this way against a real running Bindry API, confirmed `codex mcp get bindry` reports it enabled,
 and confirmed (via a real independent MCP client) that `Authorization: Bearer <key>` against `/api/mcp` returns
 real tool results — this required a small fix upstream in IBeam's default JWT scheme, which was previously
 intercepting any non-JWT Bearer value before the API-key scheme got a chance; see the Bindry-API changelog for

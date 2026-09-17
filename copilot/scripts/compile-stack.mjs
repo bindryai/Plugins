@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Compiles a Bindry Stack export into one Claude Code skill per Binding.
+// Compiles a Bindry Stack export into one GitHub Copilot skill per Binding.
 // Reads the export from a local file, a full export URL, a Stack GUID *or marketplace slug*
 // (fetched live from --api-base), or — if no source is given — whatever was last synced,
 // remembered in ./bindry.config.json.
@@ -18,8 +18,16 @@
 //
 // --mode live compiles a pointer skill per Binding that calls the Bindry MCP tools for current
 // content at run time, instead of embedding a snapshot. Requires the Bindry MCP server to be
-// connected separately — see commands/bindry-connect.md. Default is --mode pinned (unchanged
+// connected separately — see skills/bindry-connect/SKILL.md. Default is --mode pinned (unchanged
 // snapshot behavior); the mode is remembered in bindry.config.json like the Stack id and API base.
+//
+// This is GitHub Copilot's copy of the same compiler that ships with the Claude Code plugin
+// (../../claude-code/scripts/compile-stack.mjs) — identical logic, since Copilot uses the same
+// SKILL.md format. Kept as a self-contained copy rather than a shared import: installed plugins
+// live at independent, versioned cache paths per platform with no guaranteed shared filesystem
+// layout, so each plugin bundles its own scripts. The only behavioral difference is the default
+// output directory below (Copilot's first project-local skills directory is .github/skills, not
+// .claude/skills).
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
@@ -54,7 +62,7 @@ export function parseLiveComment(contents) {
 }
 
 export function parseArgs(argv) {
-  const args = { input: null, out: '.claude/skills', apiBase: null, token: null, target: 'SkillBundle', mode: null };
+  const args = { input: null, out: '.github/skills', apiBase: null, token: null, target: 'SkillBundle', mode: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') args.out = argv[++i];
     else if (argv[i] === '--api-base') args.apiBase = argv[++i];
@@ -105,7 +113,7 @@ function renderSkill(stack, binding, assets, mode) {
     lines.push('');
     lines.push(
       'If the tool call fails (not connected, network, auth/scope error), say so plainly and stop — do not ' +
-      'guess. If the Bindry MCP server isn\'t connected yet, run `/bindry-connect` first.'
+      'guess. If the Bindry MCP server isn\'t connected yet, use the `bindry-connect` skill first.'
     );
   } else {
     lines.push(renderPinComment(stack, binding));
