@@ -1,0 +1,17 @@
+{
+  "name": "bindry-plugins",
+  "owner": {
+    "name": "Bindry",
+    "url": "https://bindry.ai"
+  },
+  "metadata": {
+    "description": "Bindry's GitHub Copilot plugin marketplace"
+  },
+  "plugins": [
+    {
+      "name": "bindry",
+      "source": "./copilot",
+      "description": "Compile a bound Bindry Stack into GitHub Copilot skills, so instructions load only when they're relevant."
+    }
+  ]
+}

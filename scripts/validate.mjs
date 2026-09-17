@@ -9,9 +9,11 @@ import { execFileSync } from 'node:child_process';
 import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { codexCompilerInSync } from './sync-codex-compiler.mjs';
+import { generatedScripts, scriptInSync } from './sync-compilers.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const SKILL_PLATFORMS = ['codex', 'copilot'];
+const ALL_PLATFORMS = ['claude-code', ...SKILL_PLATFORMS];
 let failures = 0;
 
 function fail(message) {
@@ -118,38 +120,44 @@ checkManifest('.claude-plugin/marketplace.json', ['name', 'plugins']);
 checkManifest('claude-code/.claude-plugin/plugin.json', ['name', 'version', 'description']);
 checkManifest('codex/.agents/plugins/marketplace.json', ['name', 'plugins']);
 checkManifest('codex/.codex-plugin/plugin.json', ['name', 'version', 'description', 'skills']);
+checkManifest('.github/plugin/marketplace.json', ['name', 'owner', 'plugins']);
+checkManifest('copilot/plugin.json', ['name', 'version', 'description', 'skills']);
 
 // --- Claude Code commands ---
 for (const file of readdirSync(join(ROOT, 'claude-code', 'commands'))) {
   if (file.endsWith('.md')) checkFrontmatter(`claude-code/commands/${file}`, ['description']);
 }
 
-// --- Codex skills ---
-for (const dir of readdirSync(join(ROOT, 'codex', 'skills'), { withFileTypes: true })) {
-  if (dir.isDirectory()) checkFrontmatter(`codex/skills/${dir.name}/SKILL.md`, ['name', 'description']);
+// --- Codex and Copilot skills ---
+for (const platform of SKILL_PLATFORMS) {
+  for (const dir of readdirSync(join(ROOT, platform, 'skills'), { withFileTypes: true })) {
+    if (dir.isDirectory()) checkFrontmatter(`${platform}/skills/${dir.name}/SKILL.md`, ['name', 'description']);
+  }
 }
 
 // --- Script syntax ---
-for (const platform of ['claude-code', 'codex']) {
+for (const platform of ALL_PLATFORMS) {
   checkSyntax(`${platform}/scripts/compile-stack.mjs`);
   checkSyntax(`${platform}/scripts/check-drift.mjs`);
 }
 
-// --- The two compiler copies must not have drifted ---
-// They're duplicated by necessity (see sync-codex-compiler.mjs), so the thing worth catching is a
-// hand-edit to one that never made it to the other.
+// --- The generated script copies must not have drifted ---
+// They're duplicated by necessity (see sync-compilers.mjs), so the thing worth catching is a
+// hand-edit to one that never made it to the others.
 try {
-  if (codexCompilerInSync()) {
-    ok('codex/scripts/compile-stack.mjs is in sync with the Claude Code copy');
-  } else {
-    fail('codex/scripts/compile-stack.mjs has drifted — run: node scripts/sync-codex-compiler.mjs');
+  for (const { platform, script, path } of generatedScripts()) {
+    if (scriptInSync(platform, script)) {
+      ok(`${path} is in sync with the Claude Code copy`);
+    } else {
+      fail(`${path} has drifted — run: node scripts/sync-compilers.mjs`);
+    }
   }
 } catch (err) {
   fail(err.message);
 }
 
-// --- Compiler regression smoke test, both platforms, both bundled examples ---
-for (const platform of ['claude-code', 'codex']) {
+// --- Compiler regression smoke test, every platform, every bundled example ---
+for (const platform of ALL_PLATFORMS) {
   for (const exampleFile of readdirSync(join(ROOT, platform, 'examples'))) {
     if (exampleFile.endsWith('.stack.json')) checkCompiler(platform, exampleFile);
   }
