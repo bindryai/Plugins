@@ -16,8 +16,8 @@ skills.
      saved export file path, then stop.
 2. For a live sync, also need `--api-base <url>` (the Bindry API's base URL — ask the user if not obvious from
    context) and, for a private Stack, `--token <api-key>` (generated from the workspace's team page in Bindry,
-   not Account settings). A published marketplace Stack (referenced by slug or GUID) needs no token at all — it
-   resolves through the public catalog's anonymous export route. Only your own private Stacks require one.
+   not Account settings). A published Library Stack (referenced by slug or GUID) needs no token at all — it
+   resolves through the public Library's anonymous export route. Only your own private Stacks require one.
 3. Default is `--mode pinned` (a static snapshot). If the user wants this Stack to always stay current instead
    — `--mode live` — first confirm the Bindry MCP server is connected (check the configured MCP servers for one
    named `bindry`). If it isn't connected, tell the user to use the `bindry-connect` skill first and stop;

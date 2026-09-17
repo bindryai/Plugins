@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Compiles a Bindry Stack export into one GitHub Copilot skill per Binding.
-// Reads the export from a local file, a full export URL, a Stack GUID *or marketplace slug*
+// Reads the export from a local file, a full export URL, a Stack GUID *or Library slug*
 // (fetched live from --api-base), or — if no source is given — whatever was last synced,
 // remembered in ./bindry.config.json.
 //
@@ -12,7 +12,7 @@
 // Two kinds of Stack resolve here. Your own (workspace-scoped, may be private) needs --token and comes
 // from /api/stacks/{guid}/export/file. Someone else's published Stack needs no token at all and comes
 // from /api/public/catalog/stacks/{slug-or-guid}/export/file — that public route is what makes installing
-// a Stack from the marketplace possible without owning the workspace that wrote it. A token is tried
+// a Stack from the Library possible without owning the workspace that wrote it. A token is tried
 // first when present, then the public route: a key scoped to your own workspace must not stop you
 // installing a public Stack.
 //
@@ -250,9 +250,9 @@ async function readExportJson(response, url) {
   }
 }
 
-// Resolves a Stack by GUID or marketplace slug. The workspace route is only attempted for a GUID with a
+// Resolves a Stack by GUID or Library slug. The workspace route is only attempted for a GUID with a
 // token — it cannot serve a slug, and without a token it can only ever 401. Anything it declines
-// (401/403/404) falls through to the public catalog, so "I have a key for my own workspace" never becomes
+// (401/403/404) falls through to the public Library, so "I have a key for my own workspace" never becomes
 // "I can't install a public Stack".
 async function fetchLive(slugOrId, apiBase, token, target) {
   const isGuid = GUID_PATTERN.test(slugOrId);
@@ -276,22 +276,22 @@ async function fetchLive(slugOrId, apiBase, token, target) {
     if (workspaceStatus === 401 || workspaceStatus === 403) {
       fail(
         `authentication failed (${workspaceStatus}) for Stack ${slugOrId} in your workspace, and it is not ` +
-        `published to the public catalog either. Check --token (generate one from Bindry → Account settings ` +
-        `→ API keys, with the Exports permission), or set BINDRY_API_TOKEN.`
+        `published to the public Library either. Check --token (generate one from the workspace's Team page ` +
+        `in Bindry), or set BINDRY_API_TOKEN.`
       );
     }
     fail(
       token || !isGuid
         ? `Stack "${slugOrId}" was not found at ${apiBase}. A public Stack must be Published with Public ` +
           `visibility to be installable; a private one needs --token.`
-        : `Stack "${slugOrId}" is not in the public catalog at ${apiBase}. If it's your own private Stack, ` +
+        : `Stack "${slugOrId}" is not in the public Library at ${apiBase}. If it's your own private Stack, ` +
           `pass --token <api-key> (or set BINDRY_API_TOKEN).`
     );
   }
   if (publicResponse.status === 401 || publicResponse.status === 403) {
     fail(
       `authentication failed (${publicResponse.status}) fetching ${publicUrl}. ` +
-      `Pass --token <api-key> (generate one from Bindry → Account settings → API keys), ` +
+      `Pass --token <api-key> (generate one from the workspace's Team page in Bindry), ` +
       `or set the BINDRY_API_TOKEN environment variable. This Stack may be private.`
     );
   }
@@ -299,7 +299,7 @@ async function fetchLive(slugOrId, apiBase, token, target) {
 }
 
 // A path, not an identifier: has a separator, ends in .json, or names a file that actually exists.
-// Anything else is treated as a Stack GUID or marketplace slug.
+// Anything else is treated as a Stack GUID or Library slug.
 export function looksLikeLocalFile(input) {
   return (
     /[\\/]/.test(input) ||
@@ -320,7 +320,7 @@ function loadLocalFile(inputPath) {
 }
 
 async function resolveStack(args, mode) {
-  // Explicit local file path. Deliberately NOT "anything that isn't a GUID" any more: a marketplace slug
+  // Explicit local file path. Deliberately NOT "anything that isn't a GUID" any more: a Library slug
   // like `git-flow-command-center` is a perfectly good Stack identifier, and the old rule would have tried
   // to open it as a file and failed with a confusing "no such file".
   if (args.input && !/^https?:\/\//i.test(args.input) && looksLikeLocalFile(args.input)) {
@@ -334,7 +334,7 @@ async function resolveStack(args, mode) {
     return { stack: await response.json(), synced: null };
   }
 
-  // Bare Stack GUID or marketplace slug, or no input at all (falls back to the remembered config).
+  // Bare Stack GUID or Library slug, or no input at all (falls back to the remembered config).
   let stackId = args.input;
   let apiBase = args.apiBase;
   if (!stackId) {

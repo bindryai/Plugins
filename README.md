@@ -13,7 +13,7 @@ Each subdirectory is a self-contained plugin for its platform — see its own RE
 three ship a pinned (compiled snapshot) and a live (always current via MCP) sync mode from one install — the
 user picks per Stack.
 
-They also install **public** Stacks, not just your own: pass a marketplace slug with no token and the compiler
+They also install **public** Stacks, not just your own: pass a Library slug with no token and the compiler
 resolves it through `GET /api/public/catalog/stacks/{slug-or-guid}/export/file`, which is anonymous. A key is
 only needed for private Stacks. See [claude-code/README.md](claude-code/README.md#installing-someone-elses-stack).
 
