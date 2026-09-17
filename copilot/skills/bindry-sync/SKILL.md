@@ -8,7 +8,7 @@ prompt. Invoke explicitly with `/bindry-sync`, or let it trigger automatically w
 sync/update Bindry skills.
 
 1. Determine the source from what the user actually said, in order:
-   - A Stack id (GUID), a marketplace slug, or a full export URL they gave you — sync live from the Bindry API.
+   - A Stack id (GUID), a Library slug, or a full export URL they gave you — sync live from the Bindry API.
    - A file path they gave you — compile from that local export file.
    - Neither given: check for `./bindry.config.json` in the current project (written by a previous sync) and
      reuse the Stack id it remembers.
@@ -16,8 +16,8 @@ sync/update Bindry skills.
      saved export file path, then stop.
 2. For a live sync, also need `--api-base <url>` (the Bindry API's base URL — ask the user if not obvious from
    context) and, for a private Stack, `--token <api-key>` (generated from the workspace's team page in Bindry,
-   not Account settings) or the `BINDRY_API_TOKEN` environment variable. A published marketplace Stack
-   (referenced by slug or GUID) needs no token at all — it resolves through the public catalog's anonymous
+   not Account settings) or the `BINDRY_API_TOKEN` environment variable. A published Library Stack
+   (referenced by slug or GUID) needs no token at all — it resolves through the public Library's anonymous
    export route. Only your own private Stacks require one.
 3. Default is `--mode pinned` (a static snapshot). If the user wants this Stack to always stay current instead
    — `--mode live` — first confirm the Bindry MCP server is configured by running `copilot mcp get bindry`. If
