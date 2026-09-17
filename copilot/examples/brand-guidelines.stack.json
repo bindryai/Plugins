@@ -1,0 +1,38 @@
+{
+  "stackId": "stk_brand_guidelines",
+  "slug": "brand-guidelines",
+  "title": "Brand Guidelines",
+  "summary": "House visual identity rules, including the exact logo file to place in generated assets.",
+  "tokenEstimate": 210,
+  "bindings": [
+    {
+      "id": "bnd_brand_voice",
+      "slug": "brand-voice",
+      "title": "Brand Voice",
+      "version": "2.0.0",
+      "appliesWhen": ["Writing user-facing copy: marketing pages, emails, error messages"],
+      "doesNotApplyWhen": ["Internal code comments or commit messages"],
+      "instructions": "Write in plain, direct language. Name things by what a customer recognizes, not internal system terms. Prefer active voice.",
+      "constraints": ["Do not use exclamation points in error messages."],
+      "verification": ["No sentence exceeds 25 words."]
+    },
+    {
+      "id": "bnd_logo_placement",
+      "slug": "logo-placement",
+      "title": "Logo Placement",
+      "version": "1.2.0",
+      "appliesWhen": ["Adding a header, footer, or splash screen to a generated page or document"],
+      "doesNotApplyWhen": ["Internal admin tooling with no customer-facing chrome"],
+      "instructions": "Always use the exact logo file below — never redraw or approximate it. Place it bottom-right at a fixed 32px height, with at least 16px of clear space on every side.",
+      "constraints": ["Do not recolor, stretch, or rotate the logo file."],
+      "verification": ["The placed image is byte-identical to the attached logo asset."],
+      "attachments": [
+        {
+          "fileName": "logo.png",
+          "contentType": "image/png",
+          "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR4nGO4maxHU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULADrBqEy7vd1CAAAAAElFTkSuQmCC"
+        }
+      ]
+    }
+  ]
+}
