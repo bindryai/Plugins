@@ -6,14 +6,18 @@
 //   node check-drift.mjs [--dir <skills-dir>] [--api-base <url>] [--token <api-key>]
 //
 // Reuses bindry.config.json (written by compile-stack.mjs) for the Stack id and API base
-// unless overridden with flags, so a plain `/bindry-check` works right after a `/bindry-sync`.
+// unless overridden with flags, so running this right after a sync needs no arguments.
+//
+// This is GitHub Copilot's copy of the same checker that ships with the Claude Code plugin
+// (../../claude-code/scripts/check-drift.mjs) — see compile-stack.mjs in this directory for why
+// it's a self-contained copy rather than a shared import.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fail, readConfig, parsePinComment, parseLiveComment } from './compile-stack.mjs';
 
 function parseArgs(argv) {
-  const args = { dir: '.claude/skills', apiBase: null, token: null };
+  const args = { dir: '.github/skills', apiBase: null, token: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dir') args.dir = argv[++i];
     else if (argv[i] === '--api-base') args.apiBase = argv[++i];
@@ -74,16 +78,16 @@ async function main() {
   const stackId = config?.stackId;
 
   if (!stackId) {
-    fail('no Stack id known — run /bindry-sync at least once first, so bindry.config.json remembers which Stack this project is synced to.');
+    fail('no Stack id known — use the bindry-sync skill at least once first, so bindry.config.json remembers which Stack this project is synced to.');
   }
   if (!apiBase) {
-    fail('--api-base is required (or run /bindry-sync at least once so bindry.config.json remembers it).');
+    fail('--api-base is required (or use the bindry-sync skill at least once so bindry.config.json remembers it).');
   }
 
   const skillsDir = resolve(process.cwd(), args.dir);
   const skills = findCompiledSkills(skillsDir);
   if (skills.length === 0) {
-    console.log(`bindry: no compiled skills found in ${skillsDir}. Run /bindry-sync first.`);
+    console.log(`bindry: no compiled skills found in ${skillsDir}. Use the bindry-sync skill first.`);
     return;
   }
 
@@ -124,7 +128,7 @@ async function main() {
       continue;
     }
 
-    console.log(`  ? ${skillDir} — no bindry:pin or bindry:live comment found, can't check (not compiled by /bindry-sync?)`);
+    console.log(`  ? ${skillDir} — no bindry:pin or bindry:live comment found, can't check (not compiled by bindry-sync?)`);
     unknownCount++;
   }
 
@@ -134,7 +138,7 @@ async function main() {
     console.log(`bindry: all ${skills.length} skill(s) are up to date.`);
   } else {
     console.log(`bindry: ${upToDateCount} up to date, ${staleCount} stale, ${liveCount} live, ${unknownCount} unknown, out of ${skills.length} skill(s).`);
-    if (staleCount > 0) console.log('bindry: run /bindry-sync to update the stale skill(s).');
+    if (staleCount > 0) console.log('bindry: use the bindry-sync skill to update the stale skill(s).');
   }
 }
 
