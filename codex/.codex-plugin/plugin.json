@@ -1,6 +1,6 @@
 {
   "name": "bindry",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Compile a bound Bindry Stack into Codex skills, so instructions load only when they're relevant instead of sitting in every prompt. Supports pinned (compiled snapshot) or live (always current via MCP) per Stack.",
   "skills": "./skills/",
   "author": {
@@ -8,5 +8,7 @@
     "url": "https://bindry.ai"
   },
   "homepage": "https://bindry.ai/plugins/codex",
+  "repository": "https://github.com/bindryai/Plugins",
+  "license": "MIT",
   "keywords": ["bindry", "instructions", "skills", "guardrails", "mcp", "live"]
 }
