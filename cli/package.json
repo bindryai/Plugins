@@ -1,0 +1,36 @@
+{
+  "name": "bindry",
+  "version": "0.1.0",
+  "description": "Command-line client for Bindry — search, pull, and check your team's Stacks and Bindings from the terminal.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Bindry",
+  "homepage": "https://bindry.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bindryai/Plugins",
+    "directory": "cli"
+  },
+  "bin": {
+    "bindry": "./bin/bindry.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "bindry",
+    "agent-skill",
+    "ai",
+    "cli",
+    "mcp",
+    "package-manager"
+  ],
+  "scripts": {
+    "test": "node --test src/**/*.test.mjs bin/**/*.test.mjs"
+  }
+}
