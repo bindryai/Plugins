@@ -8,7 +8,7 @@ plugin per platform, sharing the same compiler logic where the underlying skill 
 | Claude Code | Built, verified end-to-end | [claude-code/](claude-code/) |
 | Codex CLI | Built, verified end-to-end | [codex/](codex/) |
 | GitHub Copilot | Built — install verified against the real CLI; agent run and live mode not yet verified | [copilot/](copilot/) |
-| Terminal (any tool, any CI) | Built — public routes verified against production; private/login paths verified against a fixture server, not yet a real workspace | [cli/](cli/) |
+| Terminal (any tool, any CI) | Built, verified end-to-end — public routes against production, private/login paths against a real workspace and key | [cli/](cli/) |
 
 Each subdirectory is a self-contained plugin for its platform — see its own README for install and usage. The
 three coding-agent plugins ship a pinned (compiled snapshot) and a live (always current via MCP) sync mode from

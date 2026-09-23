@@ -81,13 +81,17 @@ a local or staging API instead.
 - `search`, and `show` on a public slug (including a not-found identifier), were run against the real,
   live production API (`https://api.bindry.ai`) — real 200s, real 404 handling, response shapes matched what's
   documented here.
-- `login`, `list`, `show`/`pull` against a private (token-authenticated) Stack, and `check`'s drift comparison
-  were verified end-to-end against a fixture HTTP server shaped exactly like the real controllers
-  (`Bindry.API/Controllers/{Stacks,PublicCatalog}Controller.cs`) — this environment has no running Bindry.API
-  and no real Personal API Key to test against. A drift scenario (a pin baked in at one version, the server
-  reporting the Binding has since moved to another) was exercised and correctly reported as stale.
-- Not yet verified against the real API: `login`/`list`/private `pull`/`check` end-to-end with a real
-  workspace and a real key. Do that once, against a real key, before relying on this for anything private.
+- `login`, `whoami`, `list`, `show` (by GUID), `pull` (`--target skill-bundle` default, `--mode live`, and
+  `--target markdown`), and `check`'s drift comparison were all verified end-to-end against a real workspace on
+  `test-api.bindry.ai` with a real Personal API Key: a real Draft Stack with two real Bindings, correct
+  private-route resolution by GUID, correct compiled SKILL.md content and pin comments, and `check` correctly
+  reporting both Bindings as up to date immediately after a pull.
+- `show`/`pull` on a **slug** correctly fail for a private, unpublished (Draft) Stack — a slug alone can't be
+  routed to a specific private workspace, only a GUID can (with a token) or a public listing can (with a slug).
+  This is the documented, intended behavior, confirmed against the real API, not a gap.
+- Also verified end-to-end against a fixture HTTP server shaped exactly like the real controllers
+  (`Bindry.API/Controllers/{Stacks,PublicCatalog}Controller.cs`), covering a drift scenario (a pin baked in at
+  one version, the server reporting the Binding has since moved to another) reported correctly as stale.
 
 ## Current limitations
 
