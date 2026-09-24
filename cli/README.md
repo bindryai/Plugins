@@ -9,11 +9,13 @@ no browser required.
 - **`search`** — the public Library, by free-text query, kind, category, or tags. No login needed.
 - **`list`** — your own workspace's Stacks. Needs `bindry login` first.
 - **`show <slug-or-id>`** — one Stack or Binding's detail, yours or public, human-readable or `--json`.
-- **`pull <slug-or-id>`** — compiles a Stack to local files: one `SKILL.md` per Binding by default (the same
-  format and `bindry:pin` comment the Claude Code and Codex plugins already produce and read), or a single
-  Markdown/AGENTS.md file with `--target`.
-- **`check`** — read-only: compares every locally pulled skill's pinned version against the Stack's current one,
-  and reports stale/up to date/unknown. Never re-pulls or edits anything for you.
+- **`pull <slug-or-id>`** — compiles a Stack, or a standalone Binding, to local files: one `SKILL.md` per Binding
+  by default (the same format and `bindry:pin` comment the Claude Code and Codex plugins already produce and
+  read), or a single Markdown/AGENTS.md file with `--target`. Tries Stack resolution first, falls back to a
+  Binding on a real not-found.
+- **`check`** — read-only: compares every locally pulled skill's pinned version against its Stack's (or, for a
+  standalone Binding, its own) current version, and reports stale/up to date/unknown. Never re-pulls or edits
+  anything for you.
 
 A Stack pulled with this CLI and one synced by the Claude Code or Codex plugin land on disk identically — this
 is another output target for the same compiled shape, not a second format to keep in sync by hand.
@@ -65,6 +67,9 @@ bindry list --json
 bindry pull git-flow-command-center --out .claude/skills
 bindry pull git-flow-command-center --target markdown --out ./docs
 
+# Pull a single Binding on its own — same rules, no Stack required
+bindry pull quick-review-checklist --out .claude/skills
+
 # Live mode: a pointer skill that calls the Bindry MCP server for current content instead of a
 # frozen snapshot (needs the MCP server connected separately — see the Claude Code plugin's README)
 bindry pull <stack-id> --mode live
@@ -92,11 +97,13 @@ a local or staging API instead.
 - Also verified end-to-end against a fixture HTTP server shaped exactly like the real controllers
   (`Bindry.API/Controllers/{Stacks,PublicCatalog}Controller.cs`), covering a drift scenario (a pin baked in at
   one version, the server reporting the Binding has since moved to another) reported correctly as stale.
+- `pull`/`check` on a **standalone Binding** (no Stack at all) were verified against that same fixture server
+  only — the public catalog had no published standalone Binding to pull for real at the time this was built.
+  The `bindry:pin` comment correctly omits `stack=` entirely for these (rather than fabricating one), and
+  `check` correctly resolves such a pin by the Binding's own id instead of trying a Stack lookup.
 
 ## Current limitations
 
-- `pull` handles Stacks only — there's no `bindry pull` for a standalone Binding yet, even though `show` will
-  find one. `bindry.pull` on a Binding slug is a reasonable next command, not built here.
 - No shell completion, no interactive prompts — every argument is explicit, on purpose, so it stays scriptable.
 - `check`'s drift comparison, like the plugins' own `/bindry-check`, can only report "pinned at X, Stack now
   pins Y," not how many versions behind that is — the API doesn't expose a Binding's full version history.

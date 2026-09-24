@@ -7,25 +7,31 @@
 // the format identical is enforced by shared tests, not a shared module — see cli/src/compile.test.mjs
 // and the plugins' own compile-stack.test.mjs, which assert on the same fixtures.
 
-const PIN_PATTERN = /<!--\s*bindry:pin\s+stack=(\S+)\s+binding=(\S+)\s+version=(\S+)\s*-->/;
-const LIVE_PATTERN = /<!--\s*bindry:live\s+stack=(\S+)\s+binding=(\S+)\s*-->/;
+// A Binding pulled on its own (bindry pull <binding-id>, no Stack involved) carries a comment with
+// no "stack=" field at all, rather than inventing a fake Stack identifier — "stack=<binding-id>"
+// would misdescribe what actually happened. `stack: null` in the parsed/rendered shape means
+// exactly that: this skill was compiled from a standalone Binding, not a Stack.
+const PIN_PATTERN = /<!--\s*bindry:pin\s+(?:stack=(\S+)\s+)?binding=(\S+)\s+version=(\S+)\s*-->/;
+const LIVE_PATTERN = /<!--\s*bindry:live\s+(?:stack=(\S+)\s+)?binding=(\S+)\s*-->/;
 
 export function renderPinComment(stack, binding) {
-  return `<!-- bindry:pin stack=${stack.slug} binding=${binding.id} version=${binding.version} -->`;
+  const stackPart = stack ? `stack=${stack.slug} ` : '';
+  return `<!-- bindry:pin ${stackPart}binding=${binding.id} version=${binding.version} -->`;
 }
 
 export function renderLiveComment(stack, binding) {
-  return `<!-- bindry:live stack=${stack.slug} binding=${binding.id} -->`;
+  const stackPart = stack ? `stack=${stack.slug} ` : '';
+  return `<!-- bindry:live ${stackPart}binding=${binding.id} -->`;
 }
 
 export function parsePinComment(contents) {
   const match = PIN_PATTERN.exec(contents);
-  return match ? { stack: match[1], binding: match[2], version: match[3] } : null;
+  return match ? { stack: match[1] ?? null, binding: match[2], version: match[3] } : null;
 }
 
 export function parseLiveComment(contents) {
   const match = LIVE_PATTERN.exec(contents);
-  return match ? { stack: match[1], binding: match[2] } : null;
+  return match ? { stack: match[1] ?? null, binding: match[2] } : null;
 }
 
 export function slugify(value) {
