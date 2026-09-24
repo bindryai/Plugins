@@ -15,6 +15,17 @@ const TOKEN = 'test-token';
 const STACK_ID = '11111111-1111-1111-1111-111111111111';
 const BINDING_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const BINDING_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+// A Binding pulled entirely on its own (BIND-0190) — never part of a Stack. Published at version 2,
+// but the compiled content below is still the "1" snapshot, the same staleness setup the Stack test
+// uses for BINDING_A.
+const BINDING_C = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+const STANDALONE_BINDING = {
+  id: BINDING_C,
+  slug: 'quick-review',
+  title: 'Quick Review',
+  version: '1',
+  instructions: 'Look for the obvious stuff first: does it build, does it have tests, is the diff small.'
+};
 
 const SKILL_BUNDLE = {
   slug: 'git-flow',
@@ -66,6 +77,15 @@ function startFakeApi() {
     }
     if (url.pathname === '/api/public/catalog/stacks/git-flow/export') {
       return json(200, { stackTitle: 'Git Flow', target: url.searchParams.get('target'), fileName: 'git-flow.json', content: JSON.stringify(SKILL_BUNDLE) });
+    }
+    // The real endpoint resolves "by slug or id" (PublicCatalogController.GetBinding) — mirrored here
+    // so a pin recorded by GUID (the common case for check, since pull.mjs records the identifier it
+    // was actually given) resolves the same way a slug does.
+    if (url.pathname === '/api/public/catalog/bindings/quick-review' || url.pathname === `/api/public/catalog/bindings/${BINDING_C}`) {
+      return json(200, { listing: { sourceId: BINDING_C, slug: 'quick-review', title: 'Quick Review', currentVersion: '2', summary: 'Fast first-pass review.' } });
+    }
+    if (url.pathname === '/api/public/catalog/bindings/quick-review/export') {
+      return json(200, { bindingTitle: 'Quick Review', target: url.searchParams.get('target'), fileName: 'quick-review.json', content: JSON.stringify(STANDALONE_BINDING) });
     }
     return json(404, { error: 'not found' });
   });
@@ -150,6 +170,49 @@ test('pull writes one SKILL.md per Binding with a parseable pin comment', async 
       // "git-flow" slug — see pull.mjs's pinStackRef comment for why that distinction matters for
       // a private-only Stack.
       assert.match(contents, new RegExp(`bindry:pin stack=${STACK_ID} binding=${BINDING_A} version=3`));
+    });
+  });
+});
+
+test('pull falls back to a standalone Binding (BIND-0190) when no Stack matches, with no stack= in the pin', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (outDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      await pull({ apiBase, token: null, id: 'quick-review', out: outDir, target: 'skill-bundle' });
+
+      const skillPath = join(outDir, 'quick-review', 'SKILL.md');
+      assert.ok(existsSync(skillPath));
+      const contents = readFileSync(skillPath, 'utf8');
+      assert.ok(contents.includes(STANDALONE_BINDING.instructions));
+      assert.match(contents, new RegExp(`bindry:pin binding=${BINDING_C} version=1`));
+      assert.ok(!contents.includes('stack='), 'a standalone pull must not fabricate a stack= field');
+    });
+  });
+});
+
+test('check resolves a standalone Binding pin by its own id and reports drift, not "no longer part of this Stack"', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      // Pulled at version 1 (STANDALONE_BINDING); the fake API's public detail route above reports
+      // this Binding's current version as 2.
+      await pull({ apiBase, token: null, id: 'quick-review', out: bindryDir, target: 'skill-bundle' });
+
+      const rows = [];
+      const original = console.log;
+      console.log = (msg) => rows.push(msg);
+      try {
+        await check({ apiBase, token: null, dir: bindryDir, json: true });
+      } finally {
+        console.log = original;
+      }
+      const parsed = JSON.parse(rows.join('\n'));
+      const row = parsed.find((r) => r.skillDir === 'quick-review');
+      assert.equal(row.stack, null);
+      assert.equal(row.status, 'stale');
+      assert.equal(row.currentVersion, '2');
     });
   });
 });

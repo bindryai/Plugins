@@ -163,6 +163,20 @@ export async function resolveStackExport(apiBase, token, slugOrId, target) {
   return { source: 'public', stack: await exportPublicStack(apiBase, slugOrId, target) };
 }
 
+// Same "yours first, then public" resolution as resolveStackExport, for a standalone Binding.
+export async function resolveBindingExport(apiBase, token, slugOrId, target) {
+  if (token && GUID_PATTERN.test(slugOrId)) {
+    try {
+      return { source: 'private', binding: await exportMyBinding(apiBase, token, slugOrId, target) };
+    } catch (err) {
+      if (!(err instanceof BindryApiError) || (err.status !== 401 && err.status !== 403 && err.status !== 404)) {
+        throw err;
+      }
+    }
+  }
+  return { source: 'public', binding: await exportPublicBinding(apiBase, slugOrId, target) };
+}
+
 // Same "yours first, then public" resolution as resolveStackDetail, for a standalone Binding.
 export async function resolveBindingDetail(apiBase, token, slugOrId) {
   if (token && GUID_PATTERN.test(slugOrId)) {

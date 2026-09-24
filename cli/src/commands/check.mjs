@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { resolveStackDetail } from '../api.mjs';
+import { resolveStackDetail, resolveBindingDetail } from '../api.mjs';
 import { parsePinComment, parseLiveComment } from '../compile.mjs';
 import { printJson, printTable } from '../output.mjs';
 
@@ -47,14 +47,19 @@ export async function check({ apiBase, token, dir, json }) {
     return;
   }
 
-  const byStack = new Map();
+  // A pin with no stack= field came from a standalone Binding pull (BIND-0190) — there's no Stack to
+  // group it under, and no shared lookup to share across pins the way a Stack's bindings share one
+  // resolveStackDetail call. Each one is resolved on its own, by its own binding id.
+  const standalonePins = pins.filter((pin) => pin.stack === null);
+  const stackPinsByStack = new Map();
   for (const pin of pins) {
-    if (!byStack.has(pin.stack)) byStack.set(pin.stack, []);
-    byStack.get(pin.stack).push(pin);
+    if (pin.stack === null) continue;
+    if (!stackPinsByStack.has(pin.stack)) stackPinsByStack.set(pin.stack, []);
+    stackPinsByStack.get(pin.stack).push(pin);
   }
 
   const rows = [];
-  for (const [stackSlug, stackPins] of byStack) {
+  for (const [stackSlug, stackPins] of stackPinsByStack) {
     let detail;
     try {
       ({ detail } = await resolveStackDetail(apiBase, token, stackSlug));
@@ -82,13 +87,33 @@ export async function check({ apiBase, token, dir, json }) {
     }
   }
 
+  for (const pin of standalonePins) {
+    let detail;
+    try {
+      ({ detail } = await resolveBindingDetail(apiBase, token, pin.binding));
+    } catch (err) {
+      rows.push({ ...pin, status: 'unknown', currentVersion: null, note: err.message });
+      continue;
+    }
+    const currentVersion = detail.currentVersion ?? detail.listing?.currentVersion ?? null;
+    if (pin.mode === 'live') {
+      rows.push({ ...pin, status: 'live', currentVersion: null, note: '' });
+    } else if (currentVersion === null) {
+      rows.push({ ...pin, status: 'unknown', currentVersion: null, note: "couldn't read this Binding's current version" });
+    } else if (currentVersion === pin.version) {
+      rows.push({ ...pin, status: 'up to date', currentVersion, note: '' });
+    } else {
+      rows.push({ ...pin, status: 'stale', currentVersion, note: '' });
+    }
+  }
+
   if (json) {
     printJson(rows);
     return;
   }
 
   printTable(rows, [
-    { header: 'STACK', value: (r) => r.stack },
+    { header: 'STACK', value: (r) => r.stack ?? '(standalone Binding)' },
     { header: 'SKILL', value: (r) => r.skillDir },
     { header: 'PINNED', value: (r) => r.version ?? '-' },
     { header: 'CURRENT', value: (r) => r.currentVersion ?? '-' },
