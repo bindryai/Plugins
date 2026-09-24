@@ -31,6 +31,6 @@
     "package-manager"
   ],
   "scripts": {
-    "test": "node --test src/**/*.test.mjs bin/**/*.test.mjs"
+    "test": "node --test"
   }
 }
