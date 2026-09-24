@@ -8,11 +8,11 @@
   "homepage": "https://bindry.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bindryai/Plugins",
+    "url": "git+https://github.com/bindryai/Plugins.git",
     "directory": "cli"
   },
   "bin": {
-    "bindry": "./bin/bindry.mjs"
+    "bindry": "bin/bindry.mjs"
   },
   "files": [
     "bin",
