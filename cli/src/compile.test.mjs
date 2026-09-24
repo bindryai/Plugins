@@ -47,6 +47,16 @@ test('renderPinComment/renderLiveComment round-trip through their own parsers', 
   });
 });
 
+test('a standalone Binding (no Stack, BIND-0190) renders and parses with stack: null', () => {
+  const out = renderSkill(null, binding, 'pinned');
+  const pin = parsePinComment(out);
+  assert.deepEqual(pin, { stack: null, binding: binding.id, version: '3' });
+  assert.ok(!out.includes('stack='), 'a standalone pull must not fabricate a stack= field');
+
+  const live = renderLiveComment(null, binding);
+  assert.deepEqual(parseLiveComment(live), { stack: null, binding: binding.id });
+});
+
 test('slugify lowercases, strips symbols, and trims dashes', () => {
   assert.equal(slugify('Branch Naming!'), 'branch-naming');
   assert.equal(slugify('  --Weird__Title--  '), 'weird-title');
