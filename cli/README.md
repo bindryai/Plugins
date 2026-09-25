@@ -107,3 +107,29 @@ a local or staging API instead.
 - No shell completion, no interactive prompts — every argument is explicit, on purpose, so it stays scriptable.
 - `check`'s drift comparison, like the plugins' own `/bindry-check`, can only report "pinned at X, Stack now
   pins Y," not how many versions behind that is — the API doesn't expose a Binding's full version history.
+
+## Importing what you already have
+
+If a project already has instruction files, `bindry import` turns them into Bindings rather than
+making you retype them:
+
+```bash
+bindry import                 # this directory
+bindry import ../other-repo   # somewhere else
+bindry import --dry-run       # show what would be created, write nothing, no login needed
+```
+
+It reads **local files only** — no GitHub App, no OAuth, nothing stored. Recognised today:
+`.claude/skills/*/SKILL.md`, `.agents/skills`, `.github/skills`, `.cursor/rules/*.mdc`,
+`.windsurf/rules/*.md`, and `.github/instructions/*.instructions.md`. Each one becomes a **draft**,
+private where your plan allows it, and nothing is published — that stays a deliberate act in the app.
+
+Two things it deliberately does not do:
+
+- **Prose is reported, not imported.** `AGENTS.md` and `.github/copilot-instructions.md` are many
+  rules in one file; splitting them is the AI-assisted import in the app, which costs credits.
+- **Scripts and assets beside a skill are ignored.** We import instructions, not executables.
+
+An imported Binding is thin on purpose: no source format carries Bindry's "when it does *not*
+apply" or "how to verify it held", and a glob like `src/**/*.ts` says *where*, not *when* — it is
+recorded literally so you can rewrite it into a real trigger rather than finding a guess in its place.
