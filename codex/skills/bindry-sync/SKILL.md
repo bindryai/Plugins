@@ -24,20 +24,26 @@ skills.
    compiling live skills with no live connection would produce skills that always fail when used. `--mode live`
    also only works from a live Stack id/URL, not a local export file — its Bindings need real GUID ids, which a
    hand-written or example export file won't have.
-4. Locate this plugin's own installed root first (e.g. list installed Codex plugins and find the path for
+4. If the user wants a specific published version of a Library Stack rather than its latest — e.g. rules for
+   the framework release they are actually on — pass `--version <v>`. It is remembered in
+   `bindry.config.json`, so later syncs stay on that version until `--version latest` removes the pin. A
+   version pin only applies to a Library Stack (your own workspace Stack always compiles from its current
+   composition), and an unknown version fails with a message naming the versions that do exist rather than
+   quietly serving the latest.
+5. Locate this plugin's own installed root first (e.g. list installed Codex plugins and find the path for
    `bindry@<marketplace>`), then run:
-   `node <resolved-plugin-root>/scripts/compile-stack.mjs [<stack-id-or-file>] --out .agents/skills [--api-base <url>] [--token <api-key>] [--mode pinned|live]`
+   `node <resolved-plugin-root>/scripts/compile-stack.mjs [<stack-id-or-file>] --out .agents/skills [--api-base <url>] [--token <api-key>] [--mode pinned|live] [--version <v>]`
    If you can't locate `scripts/compile-stack.mjs` under this plugin's installed root, stop and say so plainly
    rather than guessing a path.
-5. Report exactly what the script printed: how many skills were written and where. If it failed with an
+6. Report exactly what the script printed: how many skills were written and where. If it failed with an
    authentication error, tell the user plainly what it said — don't guess or retry silently. If it wrote a
    `bindry.config.json`, mention that future syncs in this project can omit the Stack id (and remember the mode
    too).
-6. Remind the user to re-run this whenever a **pinned** Stack changes in Bindry — each pinned skill is tagged
+7. Remind the user to re-run this whenever a **pinned** Stack changes in Bindry — each pinned skill is tagged
    with a Binding version in an HTML comment, so the `bindry-check` skill can diff against it. A **live** skill
    never goes stale — it calls the Bindry MCP server for current content every time it's used — so there's
    nothing to re-sync for it, only re-run if the Stack's Binding *list* itself changed (added/removed Bindings).
-7. If any Binding carries a file attachment (e.g. an exact logo to place), the script downloads it into that
+8. If any Binding carries a file attachment (e.g. an exact logo to place), the script downloads it into that
    skill's `assets/` folder alongside `SKILL.md` — in both pinned and live mode, since the live MCP tools don't
    serve binary files. If the script printed a warning that it skipped an asset, mention that plainly too —
    that skill still compiled, just without the file, and needs an `--api-base`/network fix before it will

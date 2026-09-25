@@ -42,8 +42,8 @@ const COPILOT_COMPILER_PROVENANCE = `//
 function checkerDeltas(platformName, outDir) {
   return [
     [
-      '// unless overridden with flags, so a plain `/bindry-check` works right after a `/bindry-sync`.\n',
-      '// unless overridden with flags, so running this right after a sync needs no arguments.\n' +
+      '// version unless overridden with flags, so a plain `/bindry-check` works right after a `/bindry-sync`.\n',
+      '// version unless overridden with flags, so running this right after a sync needs no arguments.\n' +
       '//\n' +
       `// This is ${platformName}'s copy of the same checker that ships with the Claude Code plugin\n` +
       '// (../../claude-code/scripts/check-drift.mjs) — see compile-stack.mjs in this directory for why\n' +
@@ -54,7 +54,11 @@ function checkerDeltas(platformName, outDir) {
     ['(or run /bindry-sync at least once so', '(or use the bindry-sync skill at least once so'],
     ['Run /bindry-sync first.', 'Use the bindry-sync skill first.'],
     ['(not compiled by /bindry-sync?)', '(not compiled by bindry-sync?)'],
-    ["run /bindry-sync to update the stale skill(s).", 'use the bindry-sync skill to update the stale skill(s).']
+    ["run /bindry-sync to update the stale skill(s).", 'use the bindry-sync skill to update the stale skill(s).'],
+    [
+      'run /bindry-sync --version ${state.currentVersion} (or --version latest) when you want to move.',
+      'use the bindry-sync skill with --version ${state.currentVersion} (or --version latest) when you want to move.'
+    ]
   ];
 }
 

@@ -3,21 +3,27 @@
 // versions. Read-only — never re-syncs or writes anything.
 //
 // Usage:
-//   node check-drift.mjs [--dir <skills-dir>] [--api-base <url>] [--token <api-key>]
+//   node check-drift.mjs [--dir <skills-dir>] [--api-base <url>] [--token <api-key>] [--version <v>]
 //
-// Reuses bindry.config.json (written by compile-stack.mjs) for the Stack id and API base
-// unless overridden with flags, so a plain `/bindry-check` works right after a `/bindry-sync`.
+// Reuses bindry.config.json (written by compile-stack.mjs) for the Stack id, API base and pinned
+// version unless overridden with flags, so a plain `/bindry-check` works right after a `/bindry-sync`.
+//
+// Two questions, reported separately, because conflating them is how a pinned project reads as
+// permanently stale: (1) do the compiled skills match what this project is synced to, and (2) has the
+// Stack published a newer version than the one pinned. A pinned project that answers yes to (2) is not
+// broken — it is pinned, which is what was asked for.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { fail, readConfig, parsePinComment, parseLiveComment } from './compile-stack.mjs';
+import { fail, readConfig, parsePinComment, parseLiveComment, GUID_PATTERN } from './compile-stack.mjs';
 
 function parseArgs(argv) {
-  const args = { dir: '.claude/skills', apiBase: null, token: null };
+  const args = { dir: '.claude/skills', apiBase: null, token: null, version: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--dir') args.dir = argv[++i];
     else if (argv[i] === '--api-base') args.apiBase = argv[++i];
     else if (argv[i] === '--token') args.token = argv[++i];
+    else if (argv[i] === '--version') args.version = argv[++i];
   }
   if (!args.token) args.token = process.env.BINDRY_API_TOKEN ?? null;
   return args;
@@ -34,36 +40,100 @@ function findCompiledSkills(dir) {
   return found;
 }
 
-async function fetchStackDetail(stackId, apiBase, token) {
-  const url = `${apiBase.replace(/\/$/, '')}/api/stacks/${stackId}`;
+async function request(url, token) {
   const headers = {};
   if (token) headers['X-Api-Key'] = token;
-
-  let response;
   try {
-    response = await fetch(url, { headers });
+    return await fetch(url, { headers });
   } catch (err) {
-    fail(`could not reach ${apiBase} (${err.message}). Is the Bindry API running and reachable?`);
+    fail(`could not reach ${url} (${err.message}). Is the Bindry API running and reachable?`);
+  }
+}
+
+async function readJson(response, url) {
+  try {
+    return await response.json();
+  } catch (err) {
+    fail(`response from ${url} was not valid JSON (${err.message}).`);
+  }
+}
+
+/**
+ * What the Stack says its Bindings should be pinned at, plus the version context around it:
+ * { versionByBindingId, pinnedVersion, currentVersion, source }.
+ *
+ * Resolved "yours first, then the Library", the same order compile-stack.mjs uses — a key scoped to
+ * your own workspace must never stop you checking a Stack you installed from the Library. A pinned
+ * project goes straight to the Library route: the workspace route only ever serves the Stack's current
+ * composition, so asking it about a pinned version could only produce a confidently wrong answer.
+ */
+async function fetchStackState(stackId, apiBase, token, version) {
+  const base = apiBase.replace(/\/$/, '');
+
+  if (token && GUID_PATTERN.test(stackId) && !version) {
+    const url = `${base}/api/stacks/${stackId}`;
+    const response = await request(url, token);
+    if (response.ok) {
+      const detail = await readJson(response, url);
+      return {
+        versionByBindingId: new Map((detail.bindings ?? []).map((b) => [b.bindingId, b.pinnedVersion])),
+        pinnedVersion: null,
+        currentVersion: detail.stack?.currentVersion ?? '',
+        source: 'your workspace'
+      };
+    }
+    if (response.status !== 401 && response.status !== 403 && response.status !== 404) {
+      fail(`drift check failed: ${response.status} ${response.statusText} (${url})`);
+    }
+    // Falls through to the Library route below.
   }
 
-  if (response.status === 401 || response.status === 403) {
+  const pin = version ? `&version=${encodeURIComponent(version)}` : '';
+  const url = `${base}/api/public/catalog/stacks/${encodeURIComponent(stackId)}/export?target=SkillBundle${pin}`;
+  const response = await request(url, null);
+
+  if (response.status === 400 && version) {
+    const detail = await readProblemDetail(response);
     fail(
-      `authentication failed (${response.status}) fetching ${url}. ` +
-      `Pass --token <api-key> (generate one from the workspace's Team page in Bindry), ` +
-      `or set the BINDRY_API_TOKEN environment variable.`
+      detail
+        ? `${detail} (bindry.config.json pins version ${version})`
+        : `version ${version} of Stack "${stackId}" could not be read (${response.status} from ${url}).`
     );
   }
   if (response.status === 404) {
-    fail(`Stack ${stackId} was not found at ${apiBase} — it may have been archived.`);
+    fail(
+      `Stack "${stackId}" was not found at ${apiBase} — it may have been archived or unpublished. ` +
+      `If it is your own private Stack, pass --token <api-key> (or set BINDRY_API_TOKEN).`
+    );
   }
   if (!response.ok) {
     fail(`drift check failed: ${response.status} ${response.statusText} (${url})`);
   }
 
+  const envelope = await readJson(response, url);
+  let bundle;
   try {
-    return await response.json();
+    bundle = JSON.parse(envelope.content ?? '');
   } catch (err) {
-    fail(`response from ${url} was not valid JSON (${err.message}).`);
+    fail(`the SkillBundle export from ${url} was not valid JSON (${err.message}).`);
+  }
+
+  return {
+    versionByBindingId: new Map((bundle.bindings ?? []).map((b) => [b.id, b.version])),
+    pinnedVersion: envelope.version || null,
+    currentVersion: envelope.currentVersion ?? '',
+    source: envelope.version ? `the Library, pinned to ${envelope.version}` : 'the Library'
+  };
+}
+
+async function readProblemDetail(response) {
+  try {
+    const problem = await response.json();
+    const fieldErrors = Object.values(problem?.errors ?? {}).flat().filter(Boolean);
+    if (fieldErrors.length > 0) return fieldErrors.join(' ');
+    return problem?.detail || problem?.title || null;
+  } catch {
+    return null;
   }
 }
 
@@ -72,6 +142,8 @@ async function main() {
   const config = readConfig();
   const apiBase = args.apiBase ?? config?.apiBase;
   const stackId = config?.stackId;
+  const requestedVersion = args.version?.trim();
+  const version = requestedVersion === 'latest' ? null : (requestedVersion || config?.version || null);
 
   if (!stackId) {
     fail('no Stack id known — run /bindry-sync at least once first, so bindry.config.json remembers which Stack this project is synced to.');
@@ -87,8 +159,8 @@ async function main() {
     return;
   }
 
-  const detail = await fetchStackDetail(stackId, apiBase, args.token);
-  const currentByBindingId = new Map((detail.bindings ?? []).map((b) => [b.bindingId, b]));
+  const state = await fetchStackState(stackId, apiBase, args.token, version);
+  const currentByBindingId = state.versionByBindingId;
 
   let staleCount = 0;
   let unknownCount = 0;
@@ -99,14 +171,17 @@ async function main() {
     const pin = parsePinComment(contents);
 
     if (pin) {
-      const current = currentByBindingId.get(pin.binding);
-      if (!current) {
+      const expected = currentByBindingId.get(pin.binding);
+      if (expected === undefined) {
         console.log(`  ? ${skillDir} — its Binding is no longer part of Stack ${pin.stack} (removed, or this project is synced to a different Stack now)`);
         unknownCount++;
-      } else if (current.pinnedVersion === pin.version) {
+      } else if (expected === pin.version) {
         console.log(`  = ${skillDir} — up to date (${pin.version})`);
+      } else if (state.pinnedVersion) {
+        console.log(`  ! ${skillDir} — stale against pinned ${state.pinnedVersion}: compiled at ${pin.version}, that version pins ${expected}`);
+        staleCount++;
       } else {
-        console.log(`  ! ${skillDir} — stale: compiled at ${pin.version}, Stack now pins ${current.pinnedVersion}`);
+        console.log(`  ! ${skillDir} — stale: compiled at ${pin.version}, Stack now pins ${expected}`);
         staleCount++;
       }
       continue;
@@ -131,10 +206,26 @@ async function main() {
   const upToDateCount = skills.length - staleCount - unknownCount - liveCount;
   console.log('');
   if (staleCount === 0 && unknownCount === 0 && liveCount === 0) {
-    console.log(`bindry: all ${skills.length} skill(s) are up to date.`);
+    console.log(
+      state.pinnedVersion
+        ? `bindry: all ${skills.length} skill(s) match pinned version ${state.pinnedVersion}.`
+        : `bindry: all ${skills.length} skill(s) are up to date.`
+    );
   } else {
     console.log(`bindry: ${upToDateCount} up to date, ${staleCount} stale, ${liveCount} live, ${unknownCount} unknown, out of ${skills.length} skill(s).`);
     if (staleCount > 0) console.log('bindry: run /bindry-sync to update the stale skill(s).');
+  }
+
+  // Being behind the newest published version is a separate fact from being stale, and it is not a
+  // problem: a pinned project is deliberately not following the Stack. Said once, at the end, so a
+  // pinned project does not read as broken on every line.
+  if (state.pinnedVersion && state.currentVersion && state.currentVersion !== state.pinnedVersion) {
+    console.log(
+      `bindry: pinned to ${state.pinnedVersion}; the Stack has since published ${state.currentVersion}. ` +
+      `Nothing is stale — run /bindry-sync --version ${state.currentVersion} (or --version latest) when you want to move.`
+    );
+  } else if (state.pinnedVersion) {
+    console.log(`bindry: pinned to ${state.pinnedVersion}, which is the newest published version.`);
   }
 }
 
