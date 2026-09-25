@@ -14,7 +14,7 @@ function joinUrl(apiBase, path) {
   return `${apiBase.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
-async function request(apiBase, path, { token, searchParams } = {}) {
+async function request(apiBase, path, { token, searchParams, method, body } = {}) {
   const url = new URL(joinUrl(apiBase, path));
   if (searchParams) {
     for (const [key, value] of Object.entries(searchParams)) {
@@ -29,10 +29,15 @@ async function request(apiBase, path, { token, searchParams } = {}) {
 
   const headers = {};
   if (token) headers['X-Api-Key'] = token;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
 
   let response;
   try {
-    response = await fetch(url, { headers });
+    response = await fetch(url, {
+      method: method ?? (body === undefined ? 'GET' : 'POST'),
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
   } catch (err) {
     throw new BindryApiError(`could not reach ${url} (${err.message}). Is --api-base correct and reachable?`, {
       url: url.toString()
@@ -69,6 +74,72 @@ async function requestJson(apiBase, path, opts) {
       url: response.url
     });
   }
+}
+
+// --- Device pairing: signing in without pasting a key (BIND-0202/0203) ---
+
+/**
+ * Asks for a pairing code. Anonymous — this is what a terminal calls before anyone is signed in.
+ * Field names are RFC 8628's, because that is the shape the API speaks.
+ */
+export function startDevicePairing(apiBase, clientName) {
+  return requestJson(apiBase, '/api/auth/device/code', { body: { clientName } });
+}
+
+/**
+ * One poll. Unlike every other call here, a non-2xx is the NORMAL case: the terminal polls while it
+ * waits for a human, and "not yet" arrives as a 400 carrying an RFC 8628 error code. So this
+ * returns the outcome rather than throwing — only an unreachable or unintelligible API is
+ * exceptional.
+ */
+export async function pollDeviceToken(apiBase, deviceCode) {
+  const response = await request(apiBase, '/api/auth/device/token', { body: { deviceCode } });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // Unreadable body — falls through to the throw below rather than being guessed at.
+  }
+
+  if (response.ok && payload?.api_key) {
+    return {
+      status: 'approved',
+      apiKey: payload.api_key,
+      apiKeyId: payload.api_key_id,
+      tenantId: payload.tenant_id
+    };
+  }
+
+  if (payload?.error) return { status: payload.error };
+
+  throw new BindryApiError(
+    `pairing failed: ${response.status} ${response.statusText} (${response.url})`,
+    { status: response.status, url: response.url }
+  );
+}
+
+/**
+ * Revokes the key this CLI holds, server-side, using the key itself as proof (the API's
+ * my-api-keys/self/revoke route). Without it, logout could only forget a credential that stayed
+ * live in the workspace with nobody tracking it.
+ */
+export async function revokeOwnApiKey(apiBase, token) {
+  const response = await request(apiBase, '/api/team/my-api-keys/self/revoke', { token, body: {} });
+
+  if (response.status === 204) return true;
+  if (response.status === 404) return false;
+  if (response.status === 401 || response.status === 403) {
+    throw new BindryApiError('that token is already invalid — there is nothing to revoke.', {
+      status: response.status,
+      url: response.url
+    });
+  }
+
+  throw new BindryApiError(`could not revoke the key: ${response.status} ${response.statusText}`, {
+    status: response.status,
+    url: response.url
+  });
 }
 
 // --- Public Library (anonymous, no token) ---
