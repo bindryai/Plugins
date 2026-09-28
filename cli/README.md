@@ -34,20 +34,39 @@ npx bindry search
 
 ## Auth
 
-There's no separate account system for the CLI and no device-code flow to walk through. A **Personal API Key**
-is the same credential the Claude Code/Codex plugins already use for headless sync — create one from the
-workspace's Team page in Bindry (**not** Account settings; a key is scoped to whichever workspace's Team page
-you made it from), then:
-
 ```bash
-bindry login <token>
+bindry login
 ```
 
-This verifies the token against the API and stores it in `~/.bindry/config.json` (0600 where the platform
-supports it) so you don't have to pass it on every call. `bindry logout` removes it locally — that does not
-revoke the key itself; do that from the Team page if it may be compromised. `--token <key>` on any single
-command, or the `BINDRY_API_TOKEN` environment variable, override the stored one for that call without logging
-in at all — useful in CI.
+That prints a short code, opens `bindry.ai/device`, and waits. Approve the code there — signing up first if
+you have no account yet — and the terminal collects a workspace key of its own. Nothing is pasted, and nothing
+secret travels by email.
+
+Signing **up** deliberately happens in the browser: terms have to be shown and agreed to, and the usual
+anti-abuse checks need a real page. A terminal can do neither.
+
+The key it ends up with is an ordinary Personal API Key — the same credential the Claude Code, Codex and
+Copilot plugins use for headless sync — scoped to the one workspace you approved it for. It lands in
+`~/.bindry/config.json` (0600 where the platform supports it), and it shows up on that workspace's Team page
+like any other key.
+
+```bash
+bindry logout            # revokes the key, then forgets it
+bindry logout --keep-key # forgets it locally, leaves it working (e.g. shared with CI)
+```
+
+**In CI, or anywhere without a browser:** pass a key you already made, or set `BINDRY_API_TOKEN`.
+
+```bash
+bindry login <token>          # verify and store a key you already have
+bindry login --no-browser     # pair over SSH: the URL is printed, open it wherever you can
+BINDRY_API_TOKEN=... bindry list   # no login at all — the env var wins for that call
+```
+
+**Driving it from an agent or a script:** `login`, `logout` and `whoami` take `--json` and emit one JSON
+object per line. `bindry login --json` emits `pairing_started` (with `user_code`, the URL, and a `next_step`
+sentence to relay to a human) as soon as it has them, then `logged_in` once approval lands — so an agent can
+tell someone what to click and then wait, rather than watching a spinner it cannot see.
 
 Nothing above is required for the public Library: `search`, and `show`/`pull` against a published Stack, work
 with no login at all — the CLI tries a token first only when the identifier looks like one of your own
@@ -59,8 +78,8 @@ with no login at all — the CLI tries a token first only when the identifier lo
 # Browse the public Library
 bindry search "git flow" --kind Stack --json
 
-# Your own workspace
-bindry login <token>
+# Your own workspace — approve this machine in the browser, once
+bindry login
 bindry list --json
 
 # Pull a Stack — yours by GUID, or anyone's published one by slug

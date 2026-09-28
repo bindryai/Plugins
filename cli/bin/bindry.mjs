@@ -15,9 +15,10 @@ const HELP = `bindry — the command-line client for Bindry (bindry.ai)
 Usage: bindry <command> [arguments] [options]
 
 Commands:
-  login <token>        Store a Personal API Key (create one at <site>/api-keys) for private access.
-  logout                Remove the stored token.
-  whoami                Confirm the stored token works, and against which API.
+  login [token]         Connect this machine. With no argument, approve it in your browser;
+                        pass a Personal API Key instead for CI. --no-browser --json
+  logout                Revoke this machine's key and forget it. --keep-key --json
+  whoami                Confirm the stored token works, and against which API. --json
   search [query]        Search the public Library. --kind Stack|Binding --category <c> --tags <t,..> --json
   list                  List your own workspace's Stacks. Requires login. --include-archived --json
   show <slug-or-id>      Show one Stack or Binding's detail (yours, or public). --json
@@ -35,7 +36,7 @@ Global options:
 // as its value (e.g. --out <dir>). Getting this list wrong silently eats the next real argument
 // (or, for a flag at the end of argv, silently resolves to undefined and never fires) — --help and
 // --version both need to be here for exactly that reason.
-const BOOLEAN_FLAGS = new Set(['json', 'includeArchived', 'help', 'h', 'version', 'v']);
+const BOOLEAN_FLAGS = new Set(['json', 'includeArchived', 'noBrowser', 'keepKey', 'help', 'h', 'version', 'v']);
 
 function parseArgs(argv) {
   const flags = {};
@@ -79,11 +80,17 @@ async function main() {
 
   switch (command) {
     case 'login':
-      return login({ token: rest[0], apiBase: flags.apiBase });
+      return login({
+        token: rest[0] ?? flags.token,
+        apiBase: flags.apiBase,
+        json: flags.json,
+        noBrowser: flags.noBrowser,
+        clientName: flags.clientName
+      });
     case 'logout':
-      return logout();
+      return logout({ ...session, json: flags.json, keepKey: flags.keepKey });
     case 'whoami':
-      return whoami(session);
+      return whoami({ ...session, json: flags.json });
     case 'search':
       return search({
         ...session,
