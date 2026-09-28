@@ -212,6 +212,15 @@ export function exportPublicBinding(apiBase, slugOrId, target) {
 
 // --- Your workspace (requires a token from `bindry login`) ---
 
+/**
+ * Pushes a repository's rules folder to a Stack (BIND-0197). Reconciliation happens server-side: this
+ * sends the whole folder and gets back a per-file report of what was created, versioned, left alone, or
+ * no longer present.
+ */
+export function publishFromSource(apiBase, token, payload) {
+  return requestJson(apiBase, '/api/stacks/from-source', { token, body: payload });
+}
+
 export function listMyStacks(apiBase, token, { includeArchived } = {}) {
   return requestJson(apiBase, '/api/stacks', { token, searchParams: { includeArchived } });
 }

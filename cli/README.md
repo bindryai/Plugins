@@ -16,6 +16,11 @@ no browser required.
 - **`check`** — read-only: compares every locally pulled skill's pinned version against its Stack's (or, for a
   standalone Binding, its own) current version, and reports stale/up to date/unknown. Never re-pulls or edits
   anything for you.
+- **`eject <slug-or-id>`** — writes a Stack you own out as a `.bindry/` folder to commit to your repo: one JSON
+  document per Binding, plus `stack.json`. How a team that authored in Bindry moves to authoring in their repo.
+- **`publish [dir]`** — pushes that folder back. The server reconciles it: new Bindings are created, changed ones
+  get a new version, identical ones are left alone, and ones the folder no longer has are reported rather than
+  deleted. Built for CI, and safe to run on every commit — an unchanged folder mints no versions.
 
 A Stack pulled with this CLI and one synced by the Claude Code or Codex plugin land on disk identically — this
 is another output target for the same compiled shape, not a second format to keep in sync by hand.
@@ -95,7 +100,61 @@ bindry pull <stack-id> --mode live
 
 # Did anything change since I pulled?
 bindry check --dir .claude/skills
+
+# Move a Stack you own into your repo, then push changes back from there
+bindry eject my-stack-slug              # writes .bindry/
+bindry publish --dry-run                # see what would be sent, no key needed
+bindry publish --take-ownership         # first push only: the repo becomes the source of truth
+bindry publish                          # every push after that
+bindry publish --publish --stack-version 2.1.0   # and cut a Stack version while you are at it
 ```
+
+## Publishing a repo's rules from CI
+
+The folder `eject` writes is the format `publish` reads:
+
+```
+.bindry/
+  stack.json                          the Stack's own metadata
+  bindings/<slug>.json                one Binding per file
+```
+
+A Binding document's fields are the same ones the app authors, so the round trip is lossless — verified by
+ejecting a Stack and pushing the folder straight back, which minted no new versions at all because every
+field hashed identically. `instructions` may be a plain string or an **array of lines**; the array is what
+`eject` writes for multi-line prose, because a paragraph on one JSON line is unreadable in a pull request.
+
+Once a push has run, those Bindings and that Stack are **read-only in Bindry** — the app refuses an edit and
+names the repository, commit and file instead of accepting a change the next push would silently discard.
+
+In GitHub Actions, a workspace API key is the only credential needed. `GITHUB_REPOSITORY` and `GITHUB_SHA`
+are picked up automatically, so nothing needs passing:
+
+```yaml
+name: Publish rules to Bindry
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npx bindry publish
+        env:
+          BINDRY_API_TOKEN: ${{ secrets.BINDRY_API_TOKEN }}
+```
+
+That stages the Stack rather than publishing it, which is the right default for a job that runs on every
+commit — a human decides when to cut a version. Add `--publish --stack-version ${{ github.ref_name }}` (or
+whatever your versioning is) to a release workflow when you want CI to publish too.
+
+The command exits non-zero if any document fails, and a failed document blocks the publish even when
+publishing was asked for: a rules set with a rule missing is worse than one that did not update.
 
 `--api-base <url>` overrides the API (default `https://api.bindry.ai`, or `$BINDRY_API_BASE`) for pointing at
 a local or staging API instead.
@@ -120,6 +179,14 @@ a local or staging API instead.
   only — the public catalog had no published standalone Binding to pull for real at the time this was built.
   The `bindry:pin` comment correctly omits `stack=` entirely for these (rather than fabricating one), and
   `check` correctly resolves such a pin by the Binding's own id instead of trying a Stack lookup.
+
+## Also verified for publishing (BIND-0197)
+
+Against a real API with only an `X-Api-Key`, no browser session: ejecting an app-authored Stack of two
+Bindings and pushing the folder straight back took authorship over and minted **zero** new versions; editing
+one rule's prose bumped that one to 1.0.1 and left the other alone; deleting a file reported the removal and
+dropped it from the Stack while the Binding itself stayed alive and unarchived; `--publish --stack-version
+2.0.0` published it, and an anonymous consumer's export returned the edited content.
 
 ## Current limitations
 
