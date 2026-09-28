@@ -62,10 +62,16 @@ async function requestJson(apiBase, path, opts) {
     );
   }
   if (!response.ok) {
-    throw new BindryApiError(`request failed: ${response.status} ${response.statusText} (${response.url})`, {
-      status: response.status,
-      url: response.url
-    });
+    // The API answers a rejected write with ProblemDetails — a title, and a field-by-field errors
+    // map. Without reading it, every validation failure reads as "400 Bad Request", which tells
+    // the user nothing about which field the API objected to or why.
+    const detail = await readProblemDetail(response);
+    throw new BindryApiError(
+      detail
+        ? `${detail} (${response.status} from ${response.url})`
+        : `request failed: ${response.status} ${response.statusText} (${response.url})`,
+      { status: response.status, url: response.url }
+    );
   }
   try {
     return await response.json();
@@ -140,6 +146,35 @@ export async function revokeOwnApiKey(apiBase, token) {
     status: response.status,
     url: response.url
   });
+}
+
+/** The useful sentence out of a ProblemDetails body, or null when there isn't one. */
+async function readProblemDetail(response) {
+  try {
+    const problem = await response.json();
+    const fieldErrors = Object.values(problem?.errors ?? {}).flat().filter(Boolean);
+    if (fieldErrors.length > 0) return fieldErrors.join(' ');
+    return problem?.detail || problem?.title || null;
+  } catch {
+    return null;
+  }
+}
+
+// --- Creating your own Bindings (BIND-0205) ---
+
+/**
+ * The export targets a new Binding supports. Matches Bindry.Lib.Bindings.BindingTarget's member
+ * names exactly — the API rejects anything else — and covers every format the plugins and this CLI
+ * can compile to, so an imported Binding is usable everywhere its owner already works.
+ */
+export const BindingApiTargets = ['Claude', 'Codex', 'GitHubCopilot', 'Mcp', 'Markdown', 'CopyPaste'];
+
+/**
+ * Creates one Binding as a private draft. Everything an import produces lands here: private, so
+ * nothing internal leaks, and a draft, so publishing stays a separate deliberate act.
+ */
+export function createBinding(apiBase, token, draft) {
+  return requestJson(apiBase, '/api/bindings', { token, body: draft });
 }
 
 // --- Public Library (anonymous, no token) ---
