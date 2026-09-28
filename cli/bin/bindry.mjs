@@ -9,6 +9,8 @@ import { list } from '../src/commands/list.mjs';
 import { show } from '../src/commands/show.mjs';
 import { pull } from '../src/commands/pull.mjs';
 import { check } from '../src/commands/check.mjs';
+import { publish } from '../src/commands/publish.mjs';
+import { eject } from '../src/commands/eject.mjs';
 
 const HELP = `bindry — the command-line client for Bindry (bindry.ai)
 
@@ -23,6 +25,8 @@ Commands:
   show <slug-or-id>      Show one Stack or Binding's detail (yours, or public). --json
   pull <slug-or-id>      Pull a Stack into local files. --out <dir> --target skill-bundle|markdown|agents-md --mode pinned|live
   check                 Check locally pulled skills against their Stack's current versions. --dir <dir> --json
+  publish [dir]          Push a repo's rules folder (default .bindry) to its Stack. --publish --stack-version <v> --take-ownership --dry-run --json
+  eject <slug-or-id>     Write a rules folder from a Stack you own, to commit to your repo. --out <dir> --json
 
 Global options:
   --api-base <url>      Override the API base (default: https://api.bindry.ai, or $BINDRY_API_BASE).
@@ -35,7 +39,7 @@ Global options:
 // as its value (e.g. --out <dir>). Getting this list wrong silently eats the next real argument
 // (or, for a flag at the end of argv, silently resolves to undefined and never fires) — --help and
 // --version both need to be here for exactly that reason.
-const BOOLEAN_FLAGS = new Set(['json', 'includeArchived', 'help', 'h', 'version', 'v']);
+const BOOLEAN_FLAGS = new Set(['json', 'includeArchived', 'help', 'h', 'version', 'v', 'dryRun', 'publish', 'takeOwnership']);
 
 function parseArgs(argv) {
   const flags = {};
@@ -105,6 +109,22 @@ async function main() {
       return pull({ ...session, id: rest[0], out: flags.out, target: flags.target, mode: flags.mode });
     case 'check':
       return check({ ...session, dir: flags.dir, json: flags.json });
+    case 'publish':
+      return publish({
+        ...session,
+        dir: rest[0],
+        publish: flags.publish,
+        stackVersion: flags.stackVersion,
+        changelog: flags.changelog,
+        repository: flags.repository,
+        revision: flags.revision,
+        takeOwnership: flags.takeOwnership,
+        dryRun: flags.dryRun,
+        json: flags.json
+      });
+    case 'eject':
+      if (!rest[0]) throw new Error('usage: bindry eject <slug-or-id> [--out <dir>] [--json]');
+      return eject({ ...session, id: rest[0], out: flags.out, json: flags.json });
     default:
       console.error(`bindry: unknown command "${command}". Run "bindry --help" for usage.`);
       process.exitCode = 1;

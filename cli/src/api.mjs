@@ -14,7 +14,7 @@ function joinUrl(apiBase, path) {
   return `${apiBase.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
-async function request(apiBase, path, { token, searchParams } = {}) {
+async function request(apiBase, path, { token, searchParams, method, body } = {}) {
   const url = new URL(joinUrl(apiBase, path));
   if (searchParams) {
     for (const [key, value] of Object.entries(searchParams)) {
@@ -29,10 +29,15 @@ async function request(apiBase, path, { token, searchParams } = {}) {
 
   const headers = {};
   if (token) headers['X-Api-Key'] = token;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
 
   let response;
   try {
-    response = await fetch(url, { headers });
+    response = await fetch(url, {
+      method: method ?? (body === undefined ? 'GET' : 'POST'),
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
   } catch (err) {
     throw new BindryApiError(`could not reach ${url} (${err.message}). Is --api-base correct and reachable?`, {
       url: url.toString()
@@ -57,6 +62,16 @@ async function requestJson(apiBase, path, opts) {
     );
   }
   if (!response.ok) {
+    // A rejected write comes back as ProblemDetails — a title and a field-by-field errors map. Without
+    // reading it, every validation failure reads as "400 Bad Request", which tells the user nothing about
+    // which field the API objected to.
+    const detail = await readProblemDetail(response);
+    if (detail) {
+      throw new BindryApiError(`${detail} (${response.status} from ${response.url})`, {
+        status: response.status,
+        url: response.url
+      });
+    }
     throw new BindryApiError(`request failed: ${response.status} ${response.statusText} (${response.url})`, {
       status: response.status,
       url: response.url
@@ -105,6 +120,27 @@ export function exportPublicBinding(apiBase, slugOrId, target) {
 }
 
 // --- Your workspace (requires a token from `bindry login`) ---
+
+/** The useful sentence out of a ProblemDetails body, or null when there isn't one. */
+async function readProblemDetail(response) {
+  try {
+    const problem = await response.json();
+    const fieldErrors = Object.values(problem?.errors ?? {}).flat().filter(Boolean);
+    if (fieldErrors.length > 0) return fieldErrors.join(' ');
+    return problem?.detail || problem?.title || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Pushes a repository's rules folder to a Stack (BIND-0197). Reconciliation happens server-side: this
+ * sends the whole folder and gets back a per-file report of what was created, versioned, left alone, or
+ * no longer present.
+ */
+export function publishFromSource(apiBase, token, payload) {
+  return requestJson(apiBase, '/api/stacks/from-source', { token, body: payload });
+}
 
 export function listMyStacks(apiBase, token, { includeArchived } = {}) {
   return requestJson(apiBase, '/api/stacks', { token, searchParams: { includeArchived } });
