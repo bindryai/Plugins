@@ -10,6 +10,7 @@ import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { generatedScripts, scriptInSync } from './sync-compilers.mjs';
+import { publicExportUrl, resolvePinnedVersion } from '../claude-code/scripts/compile-stack.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SKILL_PLATFORMS = ['codex', 'copilot'];
@@ -162,6 +163,40 @@ for (const platform of ALL_PLATFORMS) {
     if (exampleFile.endsWith('.stack.json')) checkCompiler(platform, exampleFile);
   }
 }
+
+// --- Version pinning: the two decisions that would fail silently (BIND-0196) ---
+// A pin that quietly stops being sent, or a bare re-sync that quietly drops it, both look like a
+// working sync while serving the wrong version — so both are asserted here rather than left to a
+// manual check. No network: these are pure functions on purpose.
+function checkVersionPinning() {
+  const pinned = publicExportUrl('http://localhost:5160', 'git-flow', 'SkillBundle', '2.1.0');
+  if (!pinned.includes('version=2.1.0')) {
+    fail(`a pinned export URL must carry the version, got: ${pinned}`);
+    return;
+  }
+  if (publicExportUrl('http://localhost:5160', 'git-flow', 'SkillBundle', null).includes('version=')) {
+    fail('an unpinned export URL must not carry a version parameter at all');
+    return;
+  }
+  const cases = [
+    // [flag, remembered, expected]
+    [null, '1.0.0', '1.0.0'],          // a bare re-sync keeps the pin
+    ['2.0.0', '1.0.0', '2.0.0'],       // an explicit version wins over the remembered one
+    ['latest', '1.0.0', null],         // "latest" is how a pin is removed
+    [null, undefined, null],           // no pin anywhere stays unpinned
+    ['  1.5.0  ', null, '1.5.0']       // surrounding space is not part of a version
+  ];
+  for (const [flag, remembered, expected] of cases) {
+    const actual = resolvePinnedVersion(flag, remembered);
+    if (actual !== expected) {
+      fail(`resolvePinnedVersion(${JSON.stringify(flag)}, ${JSON.stringify(remembered)}) should be ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+      return;
+    }
+  }
+  ok('version pinning: the URL carries the pin, and a bare re-sync keeps it');
+}
+
+checkVersionPinning();
 
 console.log('');
 if (failures > 0) {

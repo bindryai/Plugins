@@ -7,7 +7,8 @@
 // Usage:
 //   node compile-stack.mjs <stack-export.json> [--out <dir>]
 //   node compile-stack.mjs <stack-id-or-slug> --api-base <url> [--token <api-key>] [--out <dir>] [--mode pinned|live]
-//   node compile-stack.mjs --api-base <url> [--token <api-key>]   (reuses bindry.config.json, incl. --mode)
+//   node compile-stack.mjs <stack-slug> --api-base <url> --version 1.2.0   (pin to a published version)
+//   node compile-stack.mjs --api-base <url> [--token <api-key>]   (reuses bindry.config.json, incl. --mode and --version)
 //
 // Two kinds of Stack resolve here. Your own (workspace-scoped, may be private) needs --token and comes
 // from /api/stacks/{guid}/export/file. Someone else's published Stack needs no token at all and comes
@@ -15,6 +16,12 @@
 // a Stack from the Library possible without owning the workspace that wrote it. A token is tried
 // first when present, then the public route: a key scoped to your own workspace must not stop you
 // installing a public Stack.
+//
+// --version <v> pins this project to a published version of a Library Stack, so later syncs keep
+// compiling that version's recorded content even after the publisher ships a newer one. The version is
+// remembered in bindry.config.json and honoured by a bare re-sync; --version latest removes the pin.
+// Pinning only applies to the public Library route: your own workspace Stack always compiles from its
+// current composition, which is the point of editing it.
 //
 // --mode live compiles a pointer skill per Binding that calls the Bindry MCP tools for current
 // content at run time, instead of embedding a snapshot. Requires the Bindry MCP server to be
@@ -61,14 +68,29 @@ export function parseLiveComment(contents) {
   return match ? { stack: match[1], binding: match[2] } : null;
 }
 
+/**
+ * Which version this run should compile: the flag when given, otherwise whatever bindry.config.json
+ * remembers, otherwise none.
+ *
+ * `--version latest` is how a pin is removed — an explicit word, because deleting the line from
+ * bindry.config.json by hand is the kind of thing that gets done to one checkout and not the others,
+ * and a pin that is still in half the team's configs is worse than no pin at all.
+ */
+export function resolvePinnedVersion(flag, remembered) {
+  const requested = flag?.trim();
+  if (requested === 'latest') return null;
+  return requested || remembered || null;
+}
+
 export function parseArgs(argv) {
-  const args = { input: null, out: '.github/skills', apiBase: null, token: null, target: 'SkillBundle', mode: null };
+  const args = { input: null, out: '.github/skills', apiBase: null, token: null, target: 'SkillBundle', mode: null, version: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') args.out = argv[++i];
     else if (argv[i] === '--api-base') args.apiBase = argv[++i];
     else if (argv[i] === '--token') args.token = argv[++i];
     else if (argv[i] === '--target') args.target = argv[++i];
     else if (argv[i] === '--mode') args.mode = argv[++i];
+    else if (argv[i] === '--version') args.version = argv[++i];
     else if (!args.input) args.input = argv[i];
   }
   if (!args.token) args.token = process.env.BINDRY_API_TOKEN ?? null;
@@ -229,9 +251,24 @@ function workspaceExportUrl(apiBase, stackId, target) {
   return `${apiBase.replace(/\/$/, '')}/api/stacks/${stackId}/export/file?target=${encodeURIComponent(target)}`;
 }
 
-function publicExportUrl(apiBase, slugOrId, target) {
+export function publicExportUrl(apiBase, slugOrId, target, version) {
   const base = apiBase.replace(/\/$/, '');
-  return `${base}/api/public/catalog/stacks/${encodeURIComponent(slugOrId)}/export/file?target=${encodeURIComponent(target)}`;
+  const pin = version ? `&version=${encodeURIComponent(version)}` : '';
+  return `${base}/api/public/catalog/stacks/${encodeURIComponent(slugOrId)}/export/file?target=${encodeURIComponent(target)}${pin}`;
+}
+
+// The version-pinned route answers a bad version with ProblemDetails naming the versions that do
+// exist. Without reading that body, "please pin 2.8" fails as a bare "400 Bad Request" and the one
+// piece of information the user needs — which versions they could have asked for — is thrown away.
+async function readProblemDetail(response) {
+  try {
+    const problem = await response.json();
+    const fieldErrors = Object.values(problem?.errors ?? {}).flat().filter(Boolean);
+    if (fieldErrors.length > 0) return fieldErrors.join(' ');
+    return problem?.detail || problem?.title || null;
+  } catch {
+    return null;
+  }
 }
 
 async function requestExport(url, token) {
@@ -254,11 +291,14 @@ async function readExportJson(response, url) {
 // token — it cannot serve a slug, and without a token it can only ever 401. Anything it declines
 // (401/403/404) falls through to the public Library, so "I have a key for my own workspace" never becomes
 // "I can't install a public Stack".
-async function fetchLive(slugOrId, apiBase, token, target) {
+async function fetchLive(slugOrId, apiBase, token, target, version) {
   const isGuid = GUID_PATTERN.test(slugOrId);
   let workspaceStatus = null;
 
-  if (token && isGuid) {
+  // A pinned sync skips the workspace route on purpose: /api/stacks/{id}/export always compiles the
+  // Stack's current composition and has no version to serve, so trying it first would quietly hand a
+  // pinned project the live content under a version number it never published.
+  if (token && isGuid && !version) {
     const url = workspaceExportUrl(apiBase, slugOrId, target);
     const response = await requestExport(url, token);
     if (response.ok) return readExportJson(response, url);
@@ -268,9 +308,18 @@ async function fetchLive(slugOrId, apiBase, token, target) {
     workspaceStatus = response.status;
   }
 
-  const publicUrl = publicExportUrl(apiBase, slugOrId, target);
+  const publicUrl = publicExportUrl(apiBase, slugOrId, target, version);
   const publicResponse = await requestExport(publicUrl, null);
   if (publicResponse.ok) return readExportJson(publicResponse, publicUrl);
+
+  if (version && publicResponse.status === 400) {
+    const detail = await readProblemDetail(publicResponse);
+    fail(
+      detail
+        ? `${detail} (asked for version ${version} of "${slugOrId}")`
+        : `version ${version} of Stack "${slugOrId}" could not be exported (${publicResponse.status} from ${publicUrl}).`
+    );
+  }
 
   if (publicResponse.status === 404) {
     if (workspaceStatus === 401 || workspaceStatus === 403) {
@@ -319,7 +368,7 @@ function loadLocalFile(inputPath) {
   }
 }
 
-async function resolveStack(args, mode) {
+async function resolveStack(args, mode, version) {
   // Explicit local file path. Deliberately NOT "anything that isn't a GUID" any more: a Library slug
   // like `git-flow-command-center` is a perfectly good Stack identifier, and the old rule would have tried
   // to open it as a file and failed with a confusing "no such file".
@@ -337,6 +386,12 @@ async function resolveStack(args, mode) {
   // Bare Stack GUID or Library slug, or no input at all (falls back to the remembered config).
   let stackId = args.input;
   let apiBase = args.apiBase;
+  if (version && stackId && GUID_PATTERN.test(stackId) && args.token) {
+    console.warn(
+      `bindry: --version applies to Library Stacks, and ${stackId} is a GUID with a token — looking it up in ` +
+      'the public Library rather than your workspace, because a workspace export has no version to serve.'
+    );
+  }
   if (!stackId) {
     const config = readConfig();
     if (!config?.stackId) {
@@ -351,18 +406,26 @@ async function resolveStack(args, mode) {
     fail('--api-base is required when syncing a Stack id or slug (e.g. --api-base http://localhost:5160).');
   }
 
-  const stack = await fetchLive(stackId, apiBase, args.token, args.target);
-  return { stack, synced: { stackId, apiBase, mode } };
+  const stack = await fetchLive(stackId, apiBase, args.token, args.target, version);
+  // `version` is omitted rather than written as null when unpinned, so an existing bindry.config.json
+  // that never had one is left byte-identical by a plain re-sync.
+  return { stack, synced: version ? { stackId, apiBase, mode, version } : { stackId, apiBase, mode } };
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const mode = args.mode ?? readConfig()?.mode ?? 'pinned';
+  const config = readConfig();
+  const mode = args.mode ?? config?.mode ?? 'pinned';
   if (mode !== 'pinned' && mode !== 'live') {
     fail(`--mode must be "pinned" or "live", got "${mode}".`);
   }
 
-  const { stack, synced } = await resolveStack(args, mode);
+  const version = resolvePinnedVersion(args.version, config?.version);
+  if (version && mode === 'live') {
+    fail('--version and --mode live contradict each other: a live skill always fetches current content, so there is nothing to pin.');
+  }
+
+  const { stack, synced } = await resolveStack(args, mode, version);
 
   if (!stack.slug || !Array.isArray(stack.bindings) || stack.bindings.length === 0) {
     fail('the resolved Stack export is missing "slug" or a non-empty "bindings" array — is this a Bindry Stack export?');
@@ -400,6 +463,9 @@ async function main() {
   if (synced) {
     const configPath = writeConfig(synced);
     console.log(`bindry: remembered this Stack in ${configPath} — future runs can omit the Stack id.`);
+    if (synced.version) {
+      console.log(`bindry: pinned to version ${synced.version}. Re-runs stay on it until you pass --version latest.`);
+    }
   }
 }
 
