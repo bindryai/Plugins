@@ -1,4 +1,4 @@
-// Where an imported Binding came from (BIND-0205). Useful even though nothing is being
+// Where an imported Skill came from (BIND-0205). Useful even though nothing is being
 // redistributed: six months later, "which file was this, in which repo, at which commit" is the
 // question someone actually asks.
 

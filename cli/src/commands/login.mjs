@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { writeConfig, readConfig, DEFAULT_API_BASE } from '../config.mjs';
-import { listMyStacks, startDevicePairing, pollDeviceToken, BindryApiError } from '../api.mjs';
+import { listMyBinders, startDevicePairing, pollDeviceToken, BindryApiError } from '../api.mjs';
 
 // RFC 8628 §3.5: add 5 seconds to the interval each time the server answers slow_down. Injectable
 // only so the tests can assert the widening without actually waiting it out.
@@ -27,9 +27,9 @@ export async function login({ token, apiBase, json, noBrowser, clientName, slowD
 }
 
 async function loginWithToken({ token, apiBase, json }) {
-  let stacks;
+  let binders;
   try {
-    stacks = await listMyStacks(apiBase, token);
+    binders = await listMyBinders(apiBase, token);
   } catch (err) {
     if (err instanceof BindryApiError) {
       throw new Error(`could not verify that token: ${err.message}`);
@@ -40,11 +40,11 @@ async function loginWithToken({ token, apiBase, json }) {
   writeConfig({ ...readConfig(), apiBase, token });
 
   if (json) {
-    emit({ event: 'logged_in', apiBase, method: 'token', stacks: stacks.length });
+    emit({ event: 'logged_in', apiBase, method: 'token', binders: binders.length });
     return;
   }
 
-  console.log(`bindry: logged in. ${stacks.length} Stack${stacks.length === 1 ? '' : 's'} in this workspace.`);
+  console.log(`bindry: logged in. ${binders.length} Binder${binders.length === 1 ? '' : 's'} in this workspace.`);
   console.log(`bindry: API base set to ${apiBase}.`);
 }
 

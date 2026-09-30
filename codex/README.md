@@ -1,6 +1,6 @@
 # Bindry plugin for Codex CLI
 
-Compiles a bound Bindry Stack into Codex skills — one skill per Binding — so instructions load only when a
+Compiles a bound Bindry Binder into Codex skills — one skill per Skill — so instructions load only when a
 task actually matches them, instead of sitting in context on every turn. Same idea as the Claude Code plugin
 in this repo, ported to Codex's actual plugin/skill mechanics.
 
@@ -29,7 +29,7 @@ Bindry ships three skills, each a near-direct port of the Claude Code plugin's e
 adapted to Codex's skill-only invocation model (Codex plugins have no separate "commands" concept; skills,
 triggered by description-matching or `$name`, are the only invokable action a plugin can expose):
 
-- **`bindry-sync`** — compile a Bindry Stack into `.agents/skills/` (Codex's project-local skills directory,
+- **`bindry-sync`** — compile a Bindry Binder into `.agents/skills/` (Codex's project-local skills directory,
   the equivalent of Claude Code's `.claude/skills/`). Supports the same `--mode pinned|live` split described
   below.
 - **`bindry-check`** — read-only drift report against the already-compiled skills. Never edits or re-syncs.
@@ -38,7 +38,7 @@ triggered by description-matching or `$name`, are the only invokable action a pl
 ## Live mode
 
 Same design as the Claude Code plugin: `--mode pinned` (default) compiles a static snapshot; `--mode live`
-compiles a pointer skill whose body tells the agent to call the Bindry MCP server's `bindry.bindings.get` tool
+compiles a pointer skill whose body tells the agent to call the Bindry MCP server's `bindry.skills.get` tool
 for current content instead of trusting anything cached. A live skill never goes stale, so `bindry-check`
 reports it as "live (always current)."
 
@@ -66,30 +66,30 @@ different output directory:
 
 ```bash
 # from a local export file
-node scripts/compile-stack.mjs examples/git-flow-command-center.stack.json
+node scripts/compile-binder.mjs examples/git-flow-command-center.binder.json
 
-# a Binding with an attachment (logo file)
-node scripts/compile-stack.mjs examples/brand-guidelines.stack.json
+# a Skill with an attachment (logo file)
+node scripts/compile-binder.mjs examples/brand-guidelines.binder.json
 
 # live, from a running Bindry API
-node scripts/compile-stack.mjs <stack-id> --api-base http://localhost:5160 --token <api-key> --out .agents/skills
+node scripts/compile-binder.mjs <binder-id> --api-base http://localhost:5160 --token <api-key> --out .agents/skills
 ```
 
 Verified against a real running Bindry API: output for the bundled examples is byte-identical to what the
 Claude Code compiler produces for the same input (frontmatter, pin/live comment, body, assets — only the output
-directory differs), and a full live round-trip (seed a Stack + Binding, compile pinned and live, edit the
-Binding's content, re-fetch live and see the new content immediately) was verified the same way it was for the
+directory differs), and a full live round-trip (seed a Binder + Skill, compile pinned and live, edit the
+Skill's content, re-fetch live and see the new content immediately) was verified the same way it was for the
 Claude Code plugin.
 
 ## Current limitations
 
-- `--mode live` requires real GUID Binding ids from a live-fetched Stack — the bundled
-  `examples/*.stack.json` files use illustrative ids (e.g. `bnd_git_branch_pr_hygiene`), not real GUIDs, so
-  those Bindings are skipped with a warning rather than compiling a skill that would always fail.
+- `--mode live` requires real GUID Skill ids from a live-fetched Binder — the bundled
+  `examples/*.binder.json` files use illustrative ids (e.g. `bnd_git_branch_pr_hygiene`), not real GUIDs, so
+  those Skills are skipped with a warning rather than compiling a skill that would always fail.
 - Attachments are still downloaded and pinned to disk at compile time even in live mode — the live MCP tool
-  returns a Binding's text content only, not its file attachments.
-- `/api/stacks/{id}/export` is workspace-scoped, same as the Claude Code plugin — "sync your own Stacks," not
-  "install someone else's published Stack."
+  returns a Skill's text content only, not its file attachments.
+- `/api/binders/{id}/export` is workspace-scoped, same as the Claude Code plugin — "sync your own Binders," not
+  "install someone else's published Binder."
 - Codex skills have no structured "prefer tool X" mechanism beyond the prose in the skill body itself (confirmed
   against a real OpenAI-authored plugin already installed on this machine) — a live skill's instruction to call
   the MCP tool is exactly that: an instruction, not an enforced constraint.
