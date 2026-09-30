@@ -1,7 +1,7 @@
 {
   "name": "bindry",
-  "version": "0.1.0",
-  "description": "Command-line client for Bindry — search, pull, and check your team's Stacks and Bindings from the terminal.",
+  "version": "0.2.0",
+  "description": "Command-line client for Bindry — search, pull, and check your team's Binders and Skills from the terminal.",
   "type": "module",
   "license": "MIT",
   "author": "Bindry",

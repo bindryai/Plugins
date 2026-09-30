@@ -20,7 +20,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const CODEX_COMPILER_PROVENANCE = `//
 // This is Codex's copy of the same compiler that ships with the Claude Code plugin
-// (../../claude-code/scripts/compile-stack.mjs) — identical logic, since both platforms use the
+// (../../claude-code/scripts/compile-binder.mjs) — identical logic, since both platforms use the
 // same SKILL.md format. Kept as a self-contained copy rather than a shared import: installed
 // plugins live at independent, versioned cache paths per platform with no guaranteed shared
 // filesystem layout, so each plugin bundles its own scripts. The only behavioral difference is
@@ -30,7 +30,7 @@ const CODEX_COMPILER_PROVENANCE = `//
 
 const COPILOT_COMPILER_PROVENANCE = `//
 // This is GitHub Copilot's copy of the same compiler that ships with the Claude Code plugin
-// (../../claude-code/scripts/compile-stack.mjs) — identical logic, since Copilot uses the same
+// (../../claude-code/scripts/compile-binder.mjs) — identical logic, since Copilot uses the same
 // SKILL.md format. Kept as a self-contained copy rather than a shared import: installed plugins
 // live at independent, versioned cache paths per platform with no guaranteed shared filesystem
 // layout, so each plugin bundles its own scripts. The only behavioral difference is the default
@@ -46,7 +46,7 @@ function checkerDeltas(platformName, outDir) {
       '// version unless overridden with flags, so running this right after a sync needs no arguments.\n' +
       '//\n' +
       `// This is ${platformName}'s copy of the same checker that ships with the Claude Code plugin\n` +
-      '// (../../claude-code/scripts/check-drift.mjs) — see compile-stack.mjs in this directory for why\n' +
+      '// (../../claude-code/scripts/check-drift.mjs) — see compile-binder.mjs in this directory for why\n' +
       "// it's a self-contained copy rather than a shared import.\n"
     ],
     ["dir: '.claude/skills'", `dir: '${outDir}'`],
@@ -66,16 +66,16 @@ function checkerDeltas(platformName, outDir) {
 function compilerDeltas(platformLabel, outDir, provenance) {
   return [
     [
-      '// Compiles a Bindry Stack export into one Claude Code skill per Binding.',
-      `// Compiles a Bindry Stack export into one ${platformLabel} skill per Binding.`
+      '// Compiles a Bindry Binder export into one Claude Code skill per Skill.',
+      `// Compiles a Bindry Binder export into one ${platformLabel} skill per Skill.`
     ],
     [
       '// connected separately — see commands/bindry-connect.md.',
       '// connected separately — see skills/bindry-connect/SKILL.md.'
     ],
     [
-      "// snapshot behavior); the mode is remembered in bindry.config.json like the Stack id and API base.\n",
-      "// snapshot behavior); the mode is remembered in bindry.config.json like the Stack id and API base.\n" + provenance
+      "// snapshot behavior); the mode is remembered in bindry.config.json like the Binder id and API base.\n",
+      "// snapshot behavior); the mode is remembered in bindry.config.json like the Binder id and API base.\n" + provenance
     ],
     ["out: '.claude/skills'", `out: '${outDir}'`],
     [
@@ -87,11 +87,11 @@ function compilerDeltas(platformLabel, outDir, provenance) {
 
 const PLATFORMS = {
   codex: {
-    'compile-stack.mjs': compilerDeltas('Codex', '.agents/skills', CODEX_COMPILER_PROVENANCE),
+    'compile-binder.mjs': compilerDeltas('Codex', '.agents/skills', CODEX_COMPILER_PROVENANCE),
     'check-drift.mjs': checkerDeltas('Codex', '.agents/skills')
   },
   copilot: {
-    'compile-stack.mjs': compilerDeltas('GitHub Copilot', '.github/skills', COPILOT_COMPILER_PROVENANCE),
+    'compile-binder.mjs': compilerDeltas('GitHub Copilot', '.github/skills', COPILOT_COMPILER_PROVENANCE),
     'check-drift.mjs': checkerDeltas('GitHub Copilot', '.github/skills')
   }
 };

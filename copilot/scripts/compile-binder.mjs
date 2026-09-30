@@ -1,32 +1,40 @@
 #!/usr/bin/env node
-// Compiles a Bindry Stack export into one Claude Code skill per Binding.
-// Reads the export from a local file, a full export URL, a Stack GUID *or Library slug*
+// Compiles a Bindry Binder export into one GitHub Copilot skill per Skill.
+// Reads the export from a local file, a full export URL, a Binder GUID *or Library slug*
 // (fetched live from --api-base), or — if no source is given — whatever was last synced,
 // remembered in ./bindry.config.json.
 //
 // Usage:
-//   node compile-stack.mjs <stack-export.json> [--out <dir>]
-//   node compile-stack.mjs <stack-id-or-slug> --api-base <url> [--token <api-key>] [--out <dir>] [--mode pinned|live]
-//   node compile-stack.mjs <stack-slug> --api-base <url> --version 1.2.0   (pin to a published version)
-//   node compile-stack.mjs --api-base <url> [--token <api-key>]   (reuses bindry.config.json, incl. --mode and --version)
+//   node compile-binder.mjs <binder-export.json> [--out <dir>]
+//   node compile-binder.mjs <binder-id-or-slug> --api-base <url> [--token <api-key>] [--out <dir>] [--mode pinned|live]
+//   node compile-binder.mjs <binder-slug> --api-base <url> --version 1.2.0   (pin to a published version)
+//   node compile-binder.mjs --api-base <url> [--token <api-key>]   (reuses bindry.config.json, incl. --mode and --version)
 //
-// Two kinds of Stack resolve here. Your own (workspace-scoped, may be private) needs --token and comes
-// from /api/stacks/{guid}/export/file. Someone else's published Stack needs no token at all and comes
-// from /api/public/catalog/stacks/{slug-or-guid}/export/file — that public route is what makes installing
-// a Stack from the Library possible without owning the workspace that wrote it. A token is tried
+// Two kinds of Binder resolve here. Your own (workspace-scoped, may be private) needs --token and comes
+// from /api/binders/{guid}/export/file. Someone else's published Binder needs no token at all and comes
+// from /api/public/catalog/binders/{slug-or-guid}/export/file — that public route is what makes installing
+// a Binder from the Library possible without owning the workspace that wrote it. A token is tried
 // first when present, then the public route: a key scoped to your own workspace must not stop you
-// installing a public Stack.
+// installing a public Binder.
 //
-// --version <v> pins this project to a published version of a Library Stack, so later syncs keep
+// --version <v> pins this project to a published version of a Library Binder, so later syncs keep
 // compiling that version's recorded content even after the publisher ships a newer one. The version is
 // remembered in bindry.config.json and honoured by a bare re-sync; --version latest removes the pin.
-// Pinning only applies to the public Library route: your own workspace Stack always compiles from its
+// Pinning only applies to the public Library route: your own workspace Binder always compiles from its
 // current composition, which is the point of editing it.
 //
-// --mode live compiles a pointer skill per Binding that calls the Bindry MCP tools for current
+// --mode live compiles a pointer skill per Skill that calls the Bindry MCP tools for current
 // content at run time, instead of embedding a snapshot. Requires the Bindry MCP server to be
-// connected separately — see commands/bindry-connect.md. Default is --mode pinned (unchanged
-// snapshot behavior); the mode is remembered in bindry.config.json like the Stack id and API base.
+// connected separately — see skills/bindry-connect/SKILL.md. Default is --mode pinned (unchanged
+// snapshot behavior); the mode is remembered in bindry.config.json like the Binder id and API base.
+//
+// This is GitHub Copilot's copy of the same compiler that ships with the Claude Code plugin
+// (../../claude-code/scripts/compile-binder.mjs) — identical logic, since Copilot uses the same
+// SKILL.md format. Kept as a self-contained copy rather than a shared import: installed plugins
+// live at independent, versioned cache paths per platform with no guaranteed shared filesystem
+// layout, so each plugin bundles its own scripts. The only behavioral difference is the default
+// output directory below (Copilot's first project-local skills directory is .github/skills, not
+// .claude/skills).
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
@@ -34,30 +42,30 @@ import { fileURLToPath } from 'node:url';
 
 export const CONFIG_FILE = 'bindry.config.json';
 export const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PIN_PATTERN = /<!--\s*bindry:pin\s+stack=(\S+)\s+binding=(\S+)\s+version=(\S+)\s*-->/;
-const LIVE_PATTERN = /<!--\s*bindry:live\s+stack=(\S+)\s+binding=(\S+)\s*-->/;
+const PIN_PATTERN = /<!--\s*bindry:pin\s+binder=(\S+)\s+skill=(\S+)\s+version=(\S+)\s*-->/;
+const LIVE_PATTERN = /<!--\s*bindry:live\s+binder=(\S+)\s+skill=(\S+)\s*-->/;
 
 // Shared with check-drift.mjs, which parses this same line back out of a compiled SKILL.md
 // rather than re-implementing the pin format.
-export function renderPinComment(stack, binding) {
-  return `<!-- bindry:pin stack=${stack.slug} binding=${binding.id} version=${binding.version} -->`;
+export function renderPinComment(binder, skill) {
+  return `<!-- bindry:pin binder=${binder.slug} skill=${skill.id} version=${skill.version} -->`;
 }
 
 export function parsePinComment(contents) {
   const match = PIN_PATTERN.exec(contents);
-  return match ? { stack: match[1], binding: match[2], version: match[3] } : null;
+  return match ? { binder: match[1], skill: match[2], version: match[3] } : null;
 }
 
 // A live-compiled skill has no version to pin — it always calls the MCP server for current
 // content — so it carries this sibling marker instead. Kept separate from renderPinComment
 // rather than merged so the already-tested pinned-mode format/output stays untouched.
-export function renderLiveComment(stack, binding) {
-  return `<!-- bindry:live stack=${stack.slug} binding=${binding.id} -->`;
+export function renderLiveComment(binder, skill) {
+  return `<!-- bindry:live binder=${binder.slug} skill=${skill.id} -->`;
 }
 
 export function parseLiveComment(contents) {
   const match = LIVE_PATTERN.exec(contents);
-  return match ? { stack: match[1], binding: match[2] } : null;
+  return match ? { binder: match[1], skill: match[2] } : null;
 }
 
 /**
@@ -75,7 +83,7 @@ export function resolvePinnedVersion(flag, remembered) {
 }
 
 export function parseArgs(argv) {
-  const args = { input: null, out: '.claude/skills', apiBase: null, token: null, target: 'SkillBundle', mode: null, version: null };
+  const args = { input: null, out: '.github/skills', apiBase: null, token: null, target: 'SkillBundle', mode: null, version: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') args.out = argv[++i];
     else if (argv[i] === '--api-base') args.apiBase = argv[++i];
@@ -101,55 +109,55 @@ export function slugify(value) {
     .replace(/^-+|-+$/g, '');
 }
 
-function describeSkill(binding) {
-  const trigger = binding.appliesWhen?.length
-    ? binding.appliesWhen.join('; ')
-    : binding.title;
-  return `${binding.title}. Use when: ${trigger}.`;
+function describeSkill(skill) {
+  const trigger = skill.appliesWhen?.length
+    ? skill.appliesWhen.join('; ')
+    : skill.title;
+  return `${skill.title}. Use when: ${trigger}.`;
 }
 
-function renderSkill(stack, binding, assets, mode) {
+function renderSkill(binder, skill, assets, mode) {
   const lines = [];
   lines.push('---');
-  lines.push(`name: ${slugify(binding.slug ?? binding.title)}`);
-  lines.push(`description: ${describeSkill(binding).replace(/"/g, "'")}`);
+  lines.push(`name: ${slugify(skill.slug ?? skill.title)}`);
+  lines.push(`description: ${describeSkill(skill).replace(/"/g, "'")}`);
   lines.push('---');
   lines.push('');
 
   if (mode === 'live') {
-    lines.push(renderLiveComment(stack, binding));
+    lines.push(renderLiveComment(binder, skill));
     lines.push('');
     lines.push(
       'This skill is compiled in **live** mode — its instructions are not stored locally. Before proceeding, ' +
-      `call the \`bindry.bindings.get\` MCP tool with \`{"bindingId": "${binding.id}"}\` and follow the ` +
+      `call the \`bindry.skills.get\` MCP tool with \`{"skillId": "${skill.id}"}\` and follow the ` +
       '`instructions`, `constraints`, and `verificationChecklist` it returns. Treat this file as a pointer only.'
     );
     lines.push('');
     lines.push(
       'If the tool call fails (not connected, network, auth/scope error), say so plainly and stop — do not ' +
-      'guess. If the Bindry MCP server isn\'t connected yet, run `/bindry-connect` first.'
+      'guess. If the Bindry MCP server isn\'t connected yet, use the `bindry-connect` skill first.'
     );
   } else {
-    lines.push(renderPinComment(stack, binding));
+    lines.push(renderPinComment(binder, skill));
     lines.push('');
-    lines.push(binding.instructions.trim());
+    lines.push(skill.instructions.trim());
 
-    if (binding.doesNotApplyWhen?.length) {
+    if (skill.doesNotApplyWhen?.length) {
       lines.push('');
       lines.push('Does not apply when:');
-      for (const item of binding.doesNotApplyWhen) lines.push(`- ${item}`);
+      for (const item of skill.doesNotApplyWhen) lines.push(`- ${item}`);
     }
 
-    if (binding.constraints?.length) {
+    if (skill.constraints?.length) {
       lines.push('');
       lines.push('Constraints:');
-      for (const item of binding.constraints) lines.push(`- ${item}`);
+      for (const item of skill.constraints) lines.push(`- ${item}`);
     }
 
-    if (binding.verification?.length) {
+    if (skill.verification?.length) {
       lines.push('');
       lines.push('Verify before finishing:');
-      for (const item of binding.verification) lines.push(`- ${item}`);
+      for (const item of skill.verification) lines.push(`- ${item}`);
     }
   }
 
@@ -175,15 +183,15 @@ function resolveAssetUrl(url, apiBase) {
   return `${apiBase.replace(/\/$/, '')}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
-async function downloadAssets(binding, skillDir, args) {
-  const attachments = binding.attachments ?? [];
+async function downloadAssets(skill, skillDir, args) {
+  const attachments = skill.attachments ?? [];
   if (attachments.length === 0) return [];
 
   const downloaded = [];
 
   for (const attachment of attachments) {
     if (!attachment.fileName || !attachment.url) {
-      console.warn(`bindry: skipping an attachment on "${binding.title}" missing "fileName" or "url".`);
+      console.warn(`bindry: skipping an attachment on "${skill.title}" missing "fileName" or "url".`);
       continue;
     }
 
@@ -191,7 +199,7 @@ async function downloadAssets(binding, skillDir, args) {
     const assetUrl = resolveAssetUrl(attachment.url, args.apiBase);
     if (!assetUrl) {
       console.warn(
-        `bindry: skipping asset "${fileName}" on "${binding.title}" — its URL (${attachment.url}) is relative ` +
+        `bindry: skipping asset "${fileName}" on "${skill.title}" — its URL (${attachment.url}) is relative ` +
         `and no --api-base was given to resolve it against.`
       );
       continue;
@@ -204,12 +212,12 @@ async function downloadAssets(binding, skillDir, args) {
     try {
       response = await fetch(assetUrl, { headers });
     } catch (err) {
-      console.warn(`bindry: skipping asset "${fileName}" on "${binding.title}" — could not reach ${assetUrl} (${err.message}).`);
+      console.warn(`bindry: skipping asset "${fileName}" on "${skill.title}" — could not reach ${assetUrl} (${err.message}).`);
       continue;
     }
 
     if (!response.ok) {
-      console.warn(`bindry: skipping asset "${fileName}" on "${binding.title}" — ${assetUrl} responded ${response.status} ${response.statusText}.`);
+      console.warn(`bindry: skipping asset "${fileName}" on "${skill.title}" — ${assetUrl} responded ${response.status} ${response.statusText}.`);
       continue;
     }
 
@@ -239,14 +247,14 @@ function writeConfig(config) {
   return configPath;
 }
 
-function workspaceExportUrl(apiBase, stackId, target) {
-  return `${apiBase.replace(/\/$/, '')}/api/stacks/${stackId}/export/file?target=${encodeURIComponent(target)}`;
+function workspaceExportUrl(apiBase, binderId, target) {
+  return `${apiBase.replace(/\/$/, '')}/api/binders/${binderId}/export/file?target=${encodeURIComponent(target)}`;
 }
 
 export function publicExportUrl(apiBase, slugOrId, target, version) {
   const base = apiBase.replace(/\/$/, '');
   const pin = version ? `&version=${encodeURIComponent(version)}` : '';
-  return `${base}/api/public/catalog/stacks/${encodeURIComponent(slugOrId)}/export/file?target=${encodeURIComponent(target)}${pin}`;
+  return `${base}/api/public/catalog/binders/${encodeURIComponent(slugOrId)}/export/file?target=${encodeURIComponent(target)}${pin}`;
 }
 
 // The version-pinned route answers a bad version with ProblemDetails naming the versions that do
@@ -279,16 +287,16 @@ async function readExportJson(response, url) {
   }
 }
 
-// Resolves a Stack by GUID or Library slug. The workspace route is only attempted for a GUID with a
+// Resolves a Binder by GUID or Library slug. The workspace route is only attempted for a GUID with a
 // token — it cannot serve a slug, and without a token it can only ever 401. Anything it declines
 // (401/403/404) falls through to the public Library, so "I have a key for my own workspace" never becomes
-// "I can't install a public Stack".
+// "I can't install a public Binder".
 async function fetchLive(slugOrId, apiBase, token, target, version) {
   const isGuid = GUID_PATTERN.test(slugOrId);
   let workspaceStatus = null;
 
-  // A pinned sync skips the workspace route on purpose: /api/stacks/{id}/export always compiles the
-  // Stack's current composition and has no version to serve, so trying it first would quietly hand a
+  // A pinned sync skips the workspace route on purpose: /api/binders/{id}/export always compiles the
+  // Binder's current composition and has no version to serve, so trying it first would quietly hand a
   // pinned project the live content under a version number it never published.
   if (token && isGuid && !version) {
     const url = workspaceExportUrl(apiBase, slugOrId, target);
@@ -309,23 +317,23 @@ async function fetchLive(slugOrId, apiBase, token, target, version) {
     fail(
       detail
         ? `${detail} (asked for version ${version} of "${slugOrId}")`
-        : `version ${version} of Stack "${slugOrId}" could not be exported (${publicResponse.status} from ${publicUrl}).`
+        : `version ${version} of Binder "${slugOrId}" could not be exported (${publicResponse.status} from ${publicUrl}).`
     );
   }
 
   if (publicResponse.status === 404) {
     if (workspaceStatus === 401 || workspaceStatus === 403) {
       fail(
-        `authentication failed (${workspaceStatus}) for Stack ${slugOrId} in your workspace, and it is not ` +
+        `authentication failed (${workspaceStatus}) for Binder ${slugOrId} in your workspace, and it is not ` +
         `published to the public Library either. Check --token (generate one from the workspace's Team page ` +
         `in Bindry), or set BINDRY_API_TOKEN.`
       );
     }
     fail(
       token || !isGuid
-        ? `Stack "${slugOrId}" was not found at ${apiBase}. A public Stack must be Published with Public ` +
+        ? `Binder "${slugOrId}" was not found at ${apiBase}. A public Binder must be Published with Public ` +
           `visibility to be installable; a private one needs --token.`
-        : `Stack "${slugOrId}" is not in the public Library at ${apiBase}. If it's your own private Stack, ` +
+        : `Binder "${slugOrId}" is not in the public Library at ${apiBase}. If it's your own private Binder, ` +
           `pass --token <api-key> (or set BINDRY_API_TOKEN).`
     );
   }
@@ -333,14 +341,14 @@ async function fetchLive(slugOrId, apiBase, token, target, version) {
     fail(
       `authentication failed (${publicResponse.status}) fetching ${publicUrl}. ` +
       `Pass --token <api-key> (generate one from the workspace's Team page in Bindry), ` +
-      `or set the BINDRY_API_TOKEN environment variable. This Stack may be private.`
+      `or set the BINDRY_API_TOKEN environment variable. This Binder may be private.`
     );
   }
   fail(`export request failed: ${publicResponse.status} ${publicResponse.statusText} (${publicUrl})`);
 }
 
 // A path, not an identifier: has a separator, ends in .json, or names a file that actually exists.
-// Anything else is treated as a Stack GUID or Library slug.
+// Anything else is treated as a Binder GUID or Library slug.
 export function looksLikeLocalFile(input) {
   return (
     /[\\/]/.test(input) ||
@@ -360,48 +368,48 @@ function loadLocalFile(inputPath) {
   }
 }
 
-async function resolveStack(args, mode, version) {
+async function resolveBinder(args, mode, version) {
   // Explicit local file path. Deliberately NOT "anything that isn't a GUID" any more: a Library slug
-  // like `git-flow-command-center` is a perfectly good Stack identifier, and the old rule would have tried
+  // like `git-flow-command-center` is a perfectly good Binder identifier, and the old rule would have tried
   // to open it as a file and failed with a confusing "no such file".
   if (args.input && !/^https?:\/\//i.test(args.input) && looksLikeLocalFile(args.input)) {
-    return { stack: loadLocalFile(resolve(process.cwd(), args.input)), synced: null };
+    return { binder: loadLocalFile(resolve(process.cwd(), args.input)), synced: null };
   }
 
   // Explicit full export URL.
   if (args.input && /^https?:\/\//i.test(args.input)) {
     const response = await fetch(args.input, args.token ? { headers: { 'X-Api-Key': args.token } } : undefined);
     if (!response.ok) fail(`export request failed: ${response.status} ${response.statusText} (${args.input})`);
-    return { stack: await response.json(), synced: null };
+    return { binder: await response.json(), synced: null };
   }
 
-  // Bare Stack GUID or Library slug, or no input at all (falls back to the remembered config).
-  let stackId = args.input;
+  // Bare Binder GUID or Library slug, or no input at all (falls back to the remembered config).
+  let binderId = args.input;
   let apiBase = args.apiBase;
-  if (version && stackId && GUID_PATTERN.test(stackId) && args.token) {
+  if (version && binderId && GUID_PATTERN.test(binderId) && args.token) {
     console.warn(
-      `bindry: --version applies to Library Stacks, and ${stackId} is a GUID with a token — looking it up in ` +
+      `bindry: --version applies to Library Binders, and ${binderId} is a GUID with a token — looking it up in ` +
       'the public Library rather than your workspace, because a workspace export has no version to serve.'
     );
   }
-  if (!stackId) {
+  if (!binderId) {
     const config = readConfig();
-    if (!config?.stackId) {
+    if (!config?.binderId) {
       fail(
-        'no source given and no bindry.config.json found. Usage: node compile-stack.mjs <stack-export.json | stack-id-or-slug> --api-base <url> [--token <api-key>]'
+        'no source given and no bindry.config.json found. Usage: node compile-binder.mjs <binder-export.json | binder-id-or-slug> --api-base <url> [--token <api-key>]'
       );
     }
-    stackId = config.stackId;
+    binderId = config.binderId;
     apiBase = apiBase ?? config.apiBase;
   }
   if (!apiBase) {
-    fail('--api-base is required when syncing a Stack id or slug (e.g. --api-base http://localhost:5160).');
+    fail('--api-base is required when syncing a Binder id or slug (e.g. --api-base http://localhost:5160).');
   }
 
-  const stack = await fetchLive(stackId, apiBase, args.token, args.target, version);
+  const binder = await fetchLive(binderId, apiBase, args.token, args.target, version);
   // `version` is omitted rather than written as null when unpinned, so an existing bindry.config.json
   // that never had one is left byte-identical by a plain re-sync.
-  return { stack, synced: version ? { stackId, apiBase, mode, version } : { stackId, apiBase, mode } };
+  return { binder, synced: version ? { binderId, apiBase, mode, version } : { binderId, apiBase, mode } };
 }
 
 async function main() {
@@ -417,44 +425,44 @@ async function main() {
     fail('--version and --mode live contradict each other: a live skill always fetches current content, so there is nothing to pin.');
   }
 
-  const { stack, synced } = await resolveStack(args, mode, version);
+  const { binder, synced } = await resolveBinder(args, mode, version);
 
-  if (!stack.slug || !Array.isArray(stack.bindings) || stack.bindings.length === 0) {
-    fail('the resolved Stack export is missing "slug" or a non-empty "bindings" array — is this a Bindry Stack export?');
+  if (!binder.slug || !Array.isArray(binder.skills) || binder.skills.length === 0) {
+    fail('the resolved Binder export is missing "slug" or a non-empty "skills" array — is this a Bindry Binder export?');
   }
 
   const outDir = resolve(process.cwd(), args.out);
   const written = [];
 
-  for (const binding of stack.bindings) {
-    if (!binding.slug || !binding.instructions) {
-      console.warn(`bindry: skipping a binding missing "slug" or "instructions" in ${stack.slug}`);
+  for (const skill of binder.skills) {
+    if (!skill.slug || !skill.instructions) {
+      console.warn(`bindry: skipping a skill missing "slug" or "instructions" in ${binder.slug}`);
       continue;
     }
-    if (mode === 'live' && !GUID_PATTERN.test(binding.id ?? '')) {
+    if (mode === 'live' && !GUID_PATTERN.test(skill.id ?? '')) {
       console.warn(
-        `bindry: skipping "${binding.title}" in live mode — its id ("${binding.id}") isn't a GUID, so ` +
-        `bindry.bindings.get would never be able to look it up at agent run-time.`
+        `bindry: skipping "${skill.title}" in live mode — its id ("${skill.id}") isn't a GUID, so ` +
+        `bindry.skills.get would never be able to look it up at agent run-time.`
       );
       continue;
     }
-    const skillDir = join(outDir, slugify(binding.slug));
+    const skillDir = join(outDir, slugify(skill.slug));
     mkdirSync(skillDir, { recursive: true });
-    const assets = await downloadAssets(binding, skillDir, args);
+    const assets = await downloadAssets(skill, skillDir, args);
     const skillPath = join(skillDir, 'SKILL.md');
-    writeFileSync(skillPath, renderSkill(stack, binding, assets, mode), 'utf8');
-    written.push({ title: binding.title, path: skillPath });
+    writeFileSync(skillPath, renderSkill(binder, skill, assets, mode), 'utf8');
+    written.push({ title: skill.title, path: skillPath });
   }
 
-  console.log(`bindry: compiled "${stack.title ?? stack.slug}" (${stack.bindings.length} bindings, ~${stack.tokenEstimate ?? '?'} tokens) into ${outDir}`);
+  console.log(`bindry: compiled "${binder.title ?? binder.slug}" (${binder.skills.length} skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`);
   for (const item of written) {
     console.log(`  + ${item.title} -> ${item.path}`);
   }
-  console.log(`bindry: ${written.length} skill(s) written. Re-run any time the Stack changes to stay in sync.`);
+  console.log(`bindry: ${written.length} skill(s) written. Re-run any time the Binder changes to stay in sync.`);
 
   if (synced) {
     const configPath = writeConfig(synced);
-    console.log(`bindry: remembered this Stack in ${configPath} — future runs can omit the Stack id.`);
+    console.log(`bindry: remembered this Binder in ${configPath} — future runs can omit the Binder id.`);
     if (synced.version) {
       console.log(`bindry: pinned to version ${synced.version}. Re-runs stay on it until you pass --version latest.`);
     }

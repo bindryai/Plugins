@@ -9,7 +9,7 @@ import { join, relative, sep } from 'node:path';
 
 /**
  * Where each format lives, and how to read it. `kind` decides the parser; `structured` decides
- * whether it can be turned into a Binding deterministically (free, instant) or needs the AI
+ * whether it can be turned into a Skill deterministically (free, instant) or needs the AI
  * segmentation path (costs credits, and is offered rather than assumed).
  */
 const SOURCES = [

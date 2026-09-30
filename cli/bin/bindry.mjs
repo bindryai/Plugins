@@ -22,16 +22,16 @@ Commands:
                         pass a Personal API Key instead for CI. --no-browser --json
   logout                Revoke this machine's key and forget it. --keep-key --json
   whoami                Confirm the stored token works, and against which API. --json
-  search [query]        Search the public Library. --kind Stack|Binding --category <c> --tags <t,..> --json
-  list                  List your own workspace's Stacks. Requires login. --include-archived --json
-  show <slug-or-id>      Show one Stack or Binding's detail (yours, or public). --json
-  pull <slug-or-id>      Pull a Stack into local files. --out <dir> --target skill-bundle|markdown|agents-md --mode pinned|live
-  check                 Check locally pulled skills against their Stack's current versions. --dir <dir> --json
+  search [query]        Search the public Library. --kind Binder|Skill --category <c> --tags <t,..> --json
+  list                  List your own workspace's Binders. Requires login. --include-archived --json
+  show <slug-or-id>      Show one Binder or Skill's detail (yours, or public). --json
+  pull <slug-or-id>      Pull a Binder into local files. --out <dir> --target skill-bundle|markdown|agents-md --mode pinned|live
+  check                 Check locally pulled skills against their Binder's current versions. --dir <dir> --json
   import [path]         Import the instruction files already in a project (.claude/skills,
                         .cursor/rules, .windsurf/rules, .github/instructions) as private draft
-                        Bindings. Local files only. --dry-run --json
-  publish [dir]          Push a repo's rules folder (default .bindry) to its Stack. --publish --stack-version <v> --take-ownership --dry-run --json
-  eject <slug-or-id>     Write a rules folder from a Stack you own, to commit to your repo. --out <dir> --json
+                        Skills. Local files only. --dry-run --json
+  publish [dir]          Push a repo's rules folder (default .bindry) to its Binder. --publish --binder-version <v> --take-ownership --dry-run --json
+  eject <slug-or-id>     Write a rules folder from a Binder you own, to commit to your repo. --out <dir> --json
 
 Global options:
   --api-base <url>      Override the API base (default: https://api.bindry.ai, or $BINDRY_API_BASE).
@@ -127,7 +127,7 @@ async function main() {
         ...session,
         dir: rest[0],
         publish: flags.publish,
-        stackVersion: flags.stackVersion,
+        binderVersion: flags.binderVersion,
         changelog: flags.changelog,
         repository: flags.repository,
         revision: flags.revision,

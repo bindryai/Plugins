@@ -8,7 +8,7 @@
     {
       "name": "bindry",
       "source": "./",
-      "description": "Compile a bound Bindry Stack into Codex skills, so instructions load only when they're relevant."
+      "description": "Compile a bound Bindry Binder into Codex skills, so instructions load only when they're relevant."
     }
   ]
 }

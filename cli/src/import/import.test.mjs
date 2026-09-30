@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { scanForInstructionFiles } from './scan.mjs';
-import { toBindingDraft, splitFrontmatter, slugify } from './parse.mjs';
+import { toSkillDraft, splitFrontmatter, slugify } from './parse.mjs';
 
 const TOKEN = 'test-token';
 
@@ -58,7 +58,7 @@ function makeProject() {
     'Endpoints stay thin.'
   ]);
 
-  // Prose, not one rule per file — reported, never silently imported as a single giant Binding.
+  // Prose, not one rule per file — reported, never silently imported as a single giant Skill.
   write(root, 'AGENTS.md', ['# Agents', '', 'Lots of prose about many different rules at once.']);
   write(root, '.github/copilot-instructions.md', ['Repo-wide prose instructions.']);
 
@@ -86,7 +86,7 @@ function startFakeApi({ rejectSlug } = {}) {
       res.end(JSON.stringify(payload));
     };
 
-    if (url.pathname === '/api/bindings' && req.method === 'POST') {
+    if (url.pathname === '/api/skills' && req.method === 'POST') {
       if (req.headers['x-api-key'] !== TOKEN) return json(401, { error: 'unauthorized' });
       const body = JSON.parse(raw);
       if (body.slug === rejectSlug) return json(400, { title: 'That slug is taken' });
@@ -136,11 +136,11 @@ test('every supported format is found, and tooling beside the markdown is not', 
   });
 });
 
-test('a SKILL.md becomes a Binding without any guessing', async () => {
+test('a SKILL.md becomes a Skill without any guessing', async () => {
   await withProject((root) => {
     const source = scanForInstructionFiles(root).find((f) => f.relativePath.endsWith('branch-hygiene/SKILL.md'));
 
-    const draft = toBindingDraft(source, { provenance: 'github.com/acme/api@abc1234' });
+    const draft = toSkillDraft(source, { provenance: 'github.com/acme/api@abc1234' });
 
     assert.equal(draft.slug, 'branch-hygiene');
     assert.equal(draft.title, 'Branch Hygiene');
@@ -154,7 +154,7 @@ test('a glob is recorded as where, not pretended to be when', async () => {
   await withProject((root) => {
     const cursor = scanForInstructionFiles(root).find((f) => f.relativePath.endsWith('testing.mdc'));
 
-    const draft = toBindingDraft(cursor);
+    const draft = toSkillDraft(cursor);
 
     // "src/**/*.ts" says where a rule applies, not the moment it should fire. Recorded literally so
     // the information survives and a human can see it needs rewriting into a real trigger.
@@ -166,11 +166,11 @@ test('a glob is recorded as where, not pretended to be when', async () => {
   });
 });
 
-test('a file with frontmatter but no body produces nothing rather than an empty Binding', async () => {
+test('a file with frontmatter but no body produces nothing rather than an empty Skill', async () => {
   await withProject((root) => {
     const empty = scanForInstructionFiles(root).find((f) => f.relativePath.includes('empty-rule'));
 
-    assert.equal(toBindingDraft(empty), null);
+    assert.equal(toSkillDraft(empty), null);
   });
 });
 
@@ -182,11 +182,11 @@ test('import creates private drafts and never publishes', async () => {
       await importRules({ apiBase, token: TOKEN, path: root, json: true });
 
       assert.equal(created.length, 4, 'the four structured files');
-      for (const binding of created) {
-        assert.equal(binding.visibility, 'Private');
-        assert.equal(binding.trust.reviewed, false);
-        assert.ok(binding.trust.labels.includes('Imported'));
-        assert.ok(binding.trust.provenance.length > 0, 'every Binding records where it came from');
+      for (const skill of created) {
+        assert.equal(skill.visibility, 'Private');
+        assert.equal(skill.trust.reviewed, false);
+        assert.ok(skill.trust.labels.includes('Imported'));
+        assert.ok(skill.trust.provenance.length > 0, 'every Skill records where it came from');
       }
     });
   });
@@ -202,12 +202,12 @@ test('prose is reported for review instead of being imported as one giant rule',
       const payload = JSON.parse(logs.at(-1));
       const agents = payload.results.find((r) => r.file === 'AGENTS.md');
       assert.equal(agents.status, 'needs-review');
-      assert.ok(!created.some((b) => b.slug === 'agents'), 'AGENTS.md must not become a Binding here');
+      assert.ok(!created.some((b) => b.slug === 'agents'), 'AGENTS.md must not become a Skill here');
     });
   });
 });
 
-test('one rejected Binding does not sink the rest of the import', async () => {
+test('one rejected Skill does not sink the rest of the import', async () => {
   await withApi({ rejectSlug: 'branch-hygiene' }, async ({ apiBase, created, logs }) => {
     await withProject(async (root) => {
       const { importRules } = await import('../commands/import.mjs');
