@@ -1,7 +1,7 @@
 {
   "name": "bindry",
   "version": "0.2.0",
-  "description": "Command-line client for Bindry — search, pull, and check your team's Binders and Skills from the terminal.",
+  "description": "Command-line client for Bindry — search, pull, and check your team's Binders and skills from the terminal.",
   "type": "module",
   "license": "MIT",
   "author": "Bindry",
@@ -25,6 +25,9 @@
   "keywords": [
     "bindry",
     "agent-skill",
+    "agent-skills",
+    "ai-skills",
+    "skill-md",
     "ai",
     "cli",
     "mcp",
