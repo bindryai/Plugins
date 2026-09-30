@@ -51,6 +51,17 @@ or, for the fastest way to try just the command without the plugin system, copy 
 3. Re-run `/bindry-sync` any time the Stack changes — no arguments needed the second time, it reuses
    `bindry.config.json`. A failed auth check reports a clear error (never a silently empty result).
 
+**Pinning to a published version:**
+
+A Library Stack's rules often describe a specific release of whatever they are rules for. `/bindry-sync
+<stack-slug> --api-base <url> --version 2.8.0` compiles that published version instead of the latest, and
+records it in `bindry.config.json` — so a bare re-sync stays on 2.8.0 even after the publisher ships 3.0.0.
+`--version latest` removes the pin. An unknown version fails with a message naming the versions that do
+exist; it never quietly falls back to the latest, which is the whole point.
+
+Pinning applies to Library Stacks. Your own workspace Stack always compiles from its current composition —
+being able to edit it and see the change is why you own it.
+
 **From a local export file** (offline testing, or the bundled example):
 
 1. Save a Stack export JSON as `bindry.stack.json` in your project root — an example is included at
@@ -65,6 +76,10 @@ export), reporting each skill as up to date, stale (naming both version strings)
 (no pin comment, or the Binding was removed from the Stack). It's read-only — it never edits anything or
 re-syncs for you; run `/bindry-sync` yourself once it tells you what's stale. It reuses the Stack id/API base
 from `bindry.config.json` just like `/bindry-sync` does, so it needs at least one prior sync to know what to check.
+
+On a version-pinned project it reports two things separately, because conflating them makes a pinned project
+look permanently broken: whether the compiled skills match the version you pinned, and whether the Stack has
+published a newer one since. The second is information, not staleness.
 
 ## Live mode
 

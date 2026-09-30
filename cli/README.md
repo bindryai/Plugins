@@ -16,6 +16,11 @@ no browser required.
 - **`check`** — read-only: compares every locally pulled skill's pinned version against its Stack's (or, for a
   standalone Binding, its own) current version, and reports stale/up to date/unknown. Never re-pulls or edits
   anything for you.
+- **`eject <slug-or-id>`** — writes a Stack you own out as a `.bindry/` folder to commit to your repo: one JSON
+  document per Binding, plus `stack.json`. How a team that authored in Bindry moves to authoring in their repo.
+- **`publish [dir]`** — pushes that folder back. The server reconciles it: new Bindings are created, changed ones
+  get a new version, identical ones are left alone, and ones the folder no longer has are reported rather than
+  deleted. Built for CI, and safe to run on every commit — an unchanged folder mints no versions.
 
 A Stack pulled with this CLI and one synced by the Claude Code or Codex plugin land on disk identically — this
 is another output target for the same compiled shape, not a second format to keep in sync by hand.
@@ -34,20 +39,39 @@ npx bindry search
 
 ## Auth
 
-There's no separate account system for the CLI and no device-code flow to walk through. A **Personal API Key**
-is the same credential the Claude Code/Codex plugins already use for headless sync — create one from the
-workspace's Team page in Bindry (**not** Account settings; a key is scoped to whichever workspace's Team page
-you made it from), then:
-
 ```bash
-bindry login <token>
+bindry login
 ```
 
-This verifies the token against the API and stores it in `~/.bindry/config.json` (0600 where the platform
-supports it) so you don't have to pass it on every call. `bindry logout` removes it locally — that does not
-revoke the key itself; do that from the Team page if it may be compromised. `--token <key>` on any single
-command, or the `BINDRY_API_TOKEN` environment variable, override the stored one for that call without logging
-in at all — useful in CI.
+That prints a short code, opens `bindry.ai/device`, and waits. Approve the code there — signing up first if
+you have no account yet — and the terminal collects a workspace key of its own. Nothing is pasted, and nothing
+secret travels by email.
+
+Signing **up** deliberately happens in the browser: terms have to be shown and agreed to, and the usual
+anti-abuse checks need a real page. A terminal can do neither.
+
+The key it ends up with is an ordinary Personal API Key — the same credential the Claude Code, Codex and
+Copilot plugins use for headless sync — scoped to the one workspace you approved it for. It lands in
+`~/.bindry/config.json` (0600 where the platform supports it), and it shows up on that workspace's Team page
+like any other key.
+
+```bash
+bindry logout            # revokes the key, then forgets it
+bindry logout --keep-key # forgets it locally, leaves it working (e.g. shared with CI)
+```
+
+**In CI, or anywhere without a browser:** pass a key you already made, or set `BINDRY_API_TOKEN`.
+
+```bash
+bindry login <token>          # verify and store a key you already have
+bindry login --no-browser     # pair over SSH: the URL is printed, open it wherever you can
+BINDRY_API_TOKEN=... bindry list   # no login at all — the env var wins for that call
+```
+
+**Driving it from an agent or a script:** `login`, `logout` and `whoami` take `--json` and emit one JSON
+object per line. `bindry login --json` emits `pairing_started` (with `user_code`, the URL, and a `next_step`
+sentence to relay to a human) as soon as it has them, then `logged_in` once approval lands — so an agent can
+tell someone what to click and then wait, rather than watching a spinner it cannot see.
 
 Nothing above is required for the public Library: `search`, and `show`/`pull` against a published Stack, work
 with no login at all — the CLI tries a token first only when the identifier looks like one of your own
@@ -59,8 +83,8 @@ with no login at all — the CLI tries a token first only when the identifier lo
 # Browse the public Library
 bindry search "git flow" --kind Stack --json
 
-# Your own workspace
-bindry login <token>
+# Your own workspace — approve this machine in the browser, once
+bindry login
 bindry list --json
 
 # Pull a Stack — yours by GUID, or anyone's published one by slug
@@ -76,7 +100,61 @@ bindry pull <stack-id> --mode live
 
 # Did anything change since I pulled?
 bindry check --dir .claude/skills
+
+# Move a Stack you own into your repo, then push changes back from there
+bindry eject my-stack-slug              # writes .bindry/
+bindry publish --dry-run                # see what would be sent, no key needed
+bindry publish --take-ownership         # first push only: the repo becomes the source of truth
+bindry publish                          # every push after that
+bindry publish --publish --stack-version 2.1.0   # and cut a Stack version while you are at it
 ```
+
+## Publishing a repo's rules from CI
+
+The folder `eject` writes is the format `publish` reads:
+
+```
+.bindry/
+  stack.json                          the Stack's own metadata
+  bindings/<slug>.json                one Binding per file
+```
+
+A Binding document's fields are the same ones the app authors, so the round trip is lossless — verified by
+ejecting a Stack and pushing the folder straight back, which minted no new versions at all because every
+field hashed identically. `instructions` may be a plain string or an **array of lines**; the array is what
+`eject` writes for multi-line prose, because a paragraph on one JSON line is unreadable in a pull request.
+
+Once a push has run, those Bindings and that Stack are **read-only in Bindry** — the app refuses an edit and
+names the repository, commit and file instead of accepting a change the next push would silently discard.
+
+In GitHub Actions, a workspace API key is the only credential needed. `GITHUB_REPOSITORY` and `GITHUB_SHA`
+are picked up automatically, so nothing needs passing:
+
+```yaml
+name: Publish rules to Bindry
+on:
+  push:
+    branches: [main]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npx bindry publish
+        env:
+          BINDRY_API_TOKEN: ${{ secrets.BINDRY_API_TOKEN }}
+```
+
+That stages the Stack rather than publishing it, which is the right default for a job that runs on every
+commit — a human decides when to cut a version. Add `--publish --stack-version ${{ github.ref_name }}` (or
+whatever your versioning is) to a release workflow when you want CI to publish too.
+
+The command exits non-zero if any document fails, and a failed document blocks the publish even when
+publishing was asked for: a rules set with a rule missing is worse than one that did not update.
 
 `--api-base <url>` overrides the API (default `https://api.bindry.ai`, or `$BINDRY_API_BASE`) for pointing at
 a local or staging API instead.
@@ -102,8 +180,42 @@ a local or staging API instead.
   The `bindry:pin` comment correctly omits `stack=` entirely for these (rather than fabricating one), and
   `check` correctly resolves such a pin by the Binding's own id instead of trying a Stack lookup.
 
+## Also verified for publishing (BIND-0197)
+
+Against a real API with only an `X-Api-Key`, no browser session: ejecting an app-authored Stack of two
+Bindings and pushing the folder straight back took authorship over and minted **zero** new versions; editing
+one rule's prose bumped that one to 1.0.1 and left the other alone; deleting a file reported the removal and
+dropped it from the Stack while the Binding itself stayed alive and unarchived; `--publish --stack-version
+2.0.0` published it, and an anonymous consumer's export returned the edited content.
+
 ## Current limitations
 
 - No shell completion, no interactive prompts — every argument is explicit, on purpose, so it stays scriptable.
 - `check`'s drift comparison, like the plugins' own `/bindry-check`, can only report "pinned at X, Stack now
   pins Y," not how many versions behind that is — the API doesn't expose a Binding's full version history.
+
+## Importing what you already have
+
+If a project already has instruction files, `bindry import` turns them into Bindings rather than
+making you retype them:
+
+```bash
+bindry import                 # this directory
+bindry import ../other-repo   # somewhere else
+bindry import --dry-run       # show what would be created, write nothing, no login needed
+```
+
+It reads **local files only** — no GitHub App, no OAuth, nothing stored. Recognised today:
+`.claude/skills/*/SKILL.md`, `.agents/skills`, `.github/skills`, `.cursor/rules/*.mdc`,
+`.windsurf/rules/*.md`, and `.github/instructions/*.instructions.md`. Each one becomes a **draft**,
+private where your plan allows it, and nothing is published — that stays a deliberate act in the app.
+
+Two things it deliberately does not do:
+
+- **Prose is reported, not imported.** `AGENTS.md` and `.github/copilot-instructions.md` are many
+  rules in one file; splitting them is the AI-assisted import in the app, which costs credits.
+- **Scripts and assets beside a skill are ignored.** We import instructions, not executables.
+
+An imported Binding is thin on purpose: no source format carries Bindry's "when it does *not*
+apply" or "how to verify it held", and a glob like `src/**/*.ts` says *where*, not *when* — it is
+recorded literally so you can rewrite it into a real trigger rather than finding a guess in its place.
