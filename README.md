@@ -1,6 +1,6 @@
 # Bindry.Plugins
 
-Compiles a bound [Bindry](https://bindry.ai) Stack into agent skills for whichever coding agent you use — one
+Compiles a bound [Bindry](https://bindry.ai) Binder into agent skills for whichever coding agent you use — one
 plugin per platform, sharing the same compiler logic where the underlying skill format matches.
 
 | Platform | Status | Docs |
@@ -12,13 +12,13 @@ plugin per platform, sharing the same compiler logic where the underlying skill 
 
 Each subdirectory is a self-contained plugin for its platform — see its own README for install and usage. The
 three coding-agent plugins ship a pinned (compiled snapshot) and a live (always current via MCP) sync mode from
-one install — the user picks per Stack. `cli/` is the platform-agnostic terminal client (`npm install -g
+one install — the user picks per Binder. `cli/` is the platform-agnostic terminal client (`npm install -g
 bindry`) — same pinned/live modes, same compiled output, for scripting, CI, or any agent without its own
 plugin.
 
-They also install **public** Stacks, not just your own: pass a Library slug with no token and the compiler
-resolves it through `GET /api/public/catalog/stacks/{slug-or-guid}/export/file`, which is anonymous. A key is
-only needed for private Stacks. See [claude-code/README.md](claude-code/README.md#installing-someone-elses-stack).
+They also install **public** Binders, not just your own: pass a Library slug with no token and the compiler
+resolves it through `GET /api/public/catalog/binders/{slug-or-guid}/export/file`, which is anonymous. A key is
+only needed for private Binders. See [claude-code/README.md](claude-code/README.md#installing-someone-elses-binder).
 
 The marketplace manifests live at this repo's root, which is why every install starts with
 `<cli> plugin marketplace add bindryai/Plugins` rather than a path into a subdirectory:
@@ -31,10 +31,10 @@ The marketplace manifests live at this repo's root, which is why every install s
 ## Development
 
 `node scripts/validate.mjs` (also run in CI on every push/PR) checks that every plugin's manifests and
-skill/command frontmatter are well-formed, compiles the bundled example Stacks through every compiler as a
+skill/command frontmatter are well-formed, compiles the bundled example Binders through every compiler as a
 regression smoke test, and verifies the generated script copies haven't drifted. Run it before pushing.
 
-**Editing the compiler or drift checker:** `claude-code/scripts/compile-stack.mjs` and
+**Editing the compiler or drift checker:** `claude-code/scripts/compile-binder.mjs` and
 `claude-code/scripts/check-drift.mjs` are the source of truth. Each plugin has to bundle its own copy —
 installed plugins live at independent, versioned cache paths per platform with no shared filesystem layout to
 import from — so after editing either one run:

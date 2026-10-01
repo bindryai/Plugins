@@ -1,6 +1,6 @@
 # Bindry plugin for GitHub Copilot
 
-Compiles a bound Bindry Stack into GitHub Copilot skills — one skill per Binding — so instructions load only
+Compiles a bound Bindry Binder into GitHub Copilot skills — one skill per Skill — so instructions load only
 when a task actually matches them, instead of sitting in context on every turn. Same idea as the Claude Code
 and Codex plugins in this repo, ported to Copilot's plugin/skill mechanics.
 
@@ -33,7 +33,7 @@ than copied, so edits show up in the next session.
 Bindry ships three skills, each a port of the Codex plugin's equivalent. Copilot skills are invoked by name
 with a leading slash in a prompt (`Use /bindry-sync to ...`) or trigger automatically from their description:
 
-- **`/bindry-sync`** — compile a Bindry Stack into `.github/skills/` (Copilot's first project-local skills
+- **`/bindry-sync`** — compile a Bindry Binder into `.github/skills/` (Copilot's first project-local skills
   directory; it also reads `.agents/skills/` and `.claude/skills/`). Supports the same `--mode pinned|live`
   split as the other plugins. Run `/skills reload` or start a new session to pick up newly compiled skills.
 - **`/bindry-check`** — read-only drift report against the already-compiled skills. Never edits or re-syncs.
@@ -45,7 +45,7 @@ hands the agent when a skill loads — no install path to hunt for.
 ## Live mode
 
 Same design as the other plugins: `--mode pinned` (default) compiles a static snapshot; `--mode live` compiles
-a pointer skill whose body tells the agent to call the Bindry MCP server's `bindry.bindings.get` tool for
+a pointer skill whose body tells the agent to call the Bindry MCP server's `bindry.skills.get` tool for
 current content. A live skill never goes stale, so `/bindry-check` reports it as "live (always current)."
 
 Connecting is an explicit opt-in via `/bindry-connect`, not a bundled `mcpServers` entry — bundling one would
@@ -59,10 +59,10 @@ copilot mcp add --transport http bindry <api-base>/api/mcp --header 'X-Api-Key: 
 
 ```bash
 # from a local export file (writes .github/skills/ in the current directory)
-node scripts/compile-stack.mjs examples/git-flow-command-center.stack.json
+node scripts/compile-binder.mjs examples/git-flow-command-center.binder.json
 
 # live, from a running Bindry API
-node scripts/compile-stack.mjs <stack-id> --api-base http://localhost:5160 --token <api-key>
+node scripts/compile-binder.mjs <binder-id> --api-base http://localhost:5160 --token <api-key>
 ```
 
 ## What's verified, and what isn't yet
@@ -88,7 +88,7 @@ Verified against the real `@github/copilot` CLI v1.0.85, using an isolated `COPI
 
 ## Current limitations
 
-- `--mode live` requires real GUID Binding ids from a live-fetched Stack — the bundled
-  `examples/*.stack.json` files use illustrative ids, so those Bindings are skipped with a warning.
+- `--mode live` requires real GUID Skill ids from a live-fetched Binder — the bundled
+  `examples/*.binder.json` files use illustrative ids, so those Skills are skipped with a warning.
 - Attachments are still downloaded and pinned to disk at compile time even in live mode — the live MCP tool
-  returns a Binding's text content only.
+  returns a Skill's text content only.

@@ -1,12 +1,12 @@
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { scanForInstructionFiles } from '../import/scan.mjs';
-import { toBindingDraft } from '../import/parse.mjs';
+import { toSkillDraft } from '../import/parse.mjs';
 import { describeGitSource } from '../import/provenance.mjs';
-import { createBinding, BindingApiTargets, BindryApiError } from '../api.mjs';
+import { createSkill, SkillApiTargets, BindryApiError } from '../api.mjs';
 
 /**
- * Imports the instruction files already in a project as private draft Bindings (BIND-0205).
+ * Imports the instruction files already in a project as private draft Skills (BIND-0205).
  *
  * Local disk only — no GitHub App, no OAuth, no webhooks, no stored third-party token. The agent
  * running this is already in the checked-out repo.
@@ -45,12 +45,12 @@ export async function importRules({ apiBase, token, path, dryRun, json } = {}) {
       results.push({
         file: source.relativePath,
         status: 'needs-review',
-        reason: 'prose, not one rule per file — import it in the app to have it split into Bindings'
+        reason: 'prose, not one rule per file — import it in the app to have it split into Skills'
       });
       continue;
     }
 
-    const draft = toBindingDraft(source, { provenance });
+    const draft = toSkillDraft(source, { provenance });
     if (!draft) {
       results.push({ file: source.relativePath, status: 'skipped', reason: 'no instructions found in it' });
       continue;
@@ -73,7 +73,7 @@ export async function importRules({ apiBase, token, path, dryRun, json } = {}) {
       });
     } catch (err) {
       if (!(err instanceof BindryApiError)) throw err;
-      // One rejected Binding does not fail the import: a partial result is the normal case, and
+      // One rejected Skill does not fail the import: a partial result is the normal case, and
       // the file-by-file report is how the user knows which ones need attention.
       results.push({ file: source.relativePath, status: 'failed', title: draft.title, reason: err.message });
     }
@@ -92,10 +92,10 @@ export async function importRules({ apiBase, token, path, dryRun, json } = {}) {
  */
 async function createWithBestVisibility(apiBase, token, draft) {
   try {
-    return { created: await createBinding(apiBase, token, toRequest(draft, 'Private')), visibility: 'Private' };
+    return { created: await createSkill(apiBase, token, toRequest(draft, 'Private')), visibility: 'Private' };
   } catch (err) {
     if (!(err instanceof BindryApiError) || !isPlanRestriction(err)) throw err;
-    return { created: await createBinding(apiBase, token, toRequest(draft, 'Public')), visibility: 'Draft' };
+    return { created: await createSkill(apiBase, token, toRequest(draft, 'Public')), visibility: 'Draft' };
   }
 }
 
@@ -103,7 +103,7 @@ function isPlanRestriction(err) {
   return err.status === 400 && /Pro plan or higher/i.test(err.message);
 }
 
-/** The API's BindingDraftRequest. Always a draft — publishing stays a separate deliberate act. */
+/** The API's SkillDraftRequest. Always a draft — publishing stays a separate deliberate act. */
 function toRequest(draft, visibility) {
   return {
     slug: draft.slug,
@@ -118,7 +118,7 @@ function toRequest(draft, visibility) {
     constraints: [],
     examples: [],
     verificationChecklist: [],
-    supportedTargets: BindingApiTargets,
+    supportedTargets: SkillApiTargets,
     tokenEstimate: estimateTokens(draft.instructions),
     trust: {
       reviewed: false,
@@ -157,13 +157,13 @@ function report({ json, root, results, dryRun, provenance, nothingFound }) {
 
   console.log('');
   if (dryRun) {
-    console.log(`bindry: ${created.length} Binding${created.length === 1 ? '' : 's'} would be created. Nothing was written.`);
+    console.log(`bindry: ${created.length} Skill${created.length === 1 ? '' : 's'} would be created. Nothing was written.`);
     return results;
   }
 
-  console.log(`bindry: ${created.length} Binding${created.length === 1 ? '' : 's'} created as drafts.`);
+  console.log(`bindry: ${created.length} Skill${created.length === 1 ? '' : 's'} created as drafts.`);
   if (downgraded > 0) {
-    console.log('bindry: this workspace is on a plan without private Bindings, so they were created as ordinary drafts.');
+    console.log('bindry: this workspace is on a plan without private Skills, so they were created as ordinary drafts.');
     console.log('bindry: a draft is not in the public Library either way — upgrade before publishing if these should stay private.');
   }
   console.log('bindry: review and publish them in Bindry when you are ready — nothing is public yet.');

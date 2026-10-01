@@ -63,7 +63,7 @@ function startFakeApi(script = {}) {
       return res.end();
     }
 
-    if (url.pathname === '/api/stacks') {
+    if (url.pathname === '/api/binders') {
       if (req.headers['x-api-key'] !== API_KEY && req.headers['x-api-key'] !== 'pasted-token') {
         return json(401, { error: 'unauthorized' });
       }
@@ -251,6 +251,6 @@ test('whoami answers in JSON, and says plainly when there is no session', async 
     await whoami({ apiBase, token: API_KEY, json: true });
     const payload = JSON.parse(logs.at(-1));
     assert.equal(payload.loggedIn, true);
-    assert.equal(payload.stacks, 0);
+    assert.equal(payload.binders, 0);
   });
 });

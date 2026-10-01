@@ -1,7 +1,7 @@
 {
   "name": "bindry",
   "version": "0.2.2",
-  "description": "Compile a bound Bindry Stack into Codex skills, so instructions load only when they're relevant instead of sitting in every prompt. Supports pinned (compiled snapshot) or live (always current via MCP) per Stack.",
+  "description": "Compile a bound Bindry Binder into Codex skills, so instructions load only when they're relevant instead of sitting in every prompt. Supports pinned (compiled snapshot) or live (always current via MCP) per Binder.",
   "skills": "./skills/",
   "author": {
     "name": "Bindry",

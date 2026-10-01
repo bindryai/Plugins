@@ -1,9 +1,9 @@
-// Turns an instruction file into a Binding draft (BIND-0205).
+// Turns an instruction file into a Skill draft (BIND-0205).
 //
-// Structured formats parse deterministically: a SKILL.md already IS a Binding — a name, a
+// Structured formats parse deterministically: a SKILL.md already IS a Skill — a name, a
 // description, a body — so there is nothing to infer and nothing to charge for. What no source
 // format carries is Bindry's appliesWhen / doesNotApplyWhen / verification split, so an imported
-// Binding is thin by design. Enriching it is a separate, opt-in step; guessing here would produce
+// Skill is thin by design. Enriching it is a separate, opt-in step; guessing here would produce
 // confident nonsense in the field that decides when a rule fires.
 
 import { basename, dirname } from 'node:path';
@@ -38,11 +38,11 @@ export function slugify(value) {
 }
 
 /**
- * A Binding draft from one scanned file, or null when there is nothing usable in it.
+ * A Skill draft from one scanned file, or null when there is nothing usable in it.
  * `source` is what scanForInstructionFiles returned; `provenance` is recorded so an imported
- * Binding can always be traced back to the file it came from.
+ * Skill can always be traced back to the file it came from.
  */
-export function toBindingDraft(source, { provenance } = {}) {
+export function toSkillDraft(source, { provenance } = {}) {
   if (!source.content) return null;
 
   const parsed = PARSERS[source.kind]?.(source);
@@ -130,7 +130,7 @@ const PARSERS = {
 /**
  * A path pattern is not a task moment — "src/**\/*.ts" says where, not when. Recorded as a
  * literal "working in" line so the information is not lost, and so it is obvious to a human
- * editing the Binding later that this needs rewriting into a real trigger.
+ * editing the Skill later that this needs rewriting into a real trigger.
  */
 function globsToAppliesWhen(globs) {
   if (!globs) return [];
