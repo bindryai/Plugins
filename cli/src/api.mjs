@@ -160,21 +160,21 @@ async function readProblemDetail(response) {
   }
 }
 
-// --- Creating your own Bindings (BIND-0205) ---
+// --- Creating your own Skills (BIND-0205) ---
 
 /**
- * The export targets a new Binding supports. Matches Bindry.Lib.Bindings.BindingTarget's member
+ * The export targets a new Skill supports. Matches Bindry.Lib.Skills.SkillTarget's member
  * names exactly — the API rejects anything else — and covers every format the plugins and this CLI
- * can compile to, so an imported Binding is usable everywhere its owner already works.
+ * can compile to, so an imported Skill is usable everywhere its owner already works.
  */
-export const BindingApiTargets = ['Claude', 'Codex', 'GitHubCopilot', 'Mcp', 'Markdown', 'CopyPaste'];
+export const SkillApiTargets = ['Claude', 'Codex', 'GitHubCopilot', 'Mcp', 'Markdown', 'CopyPaste'];
 
 /**
- * Creates one Binding as a private draft. Everything an import produces lands here: private, so
+ * Creates one Skill as a private draft. Everything an import produces lands here: private, so
  * nothing internal leaks, and a draft, so publishing stays a separate deliberate act.
  */
-export function createBinding(apiBase, token, draft) {
-  return requestJson(apiBase, '/api/bindings', { token, body: draft });
+export function createSkill(apiBase, token, draft) {
+  return requestJson(apiBase, '/api/skills', { token, body: draft });
 }
 
 // --- Public Library (anonymous, no token) ---
@@ -185,27 +185,27 @@ export function searchPublicCatalog(apiBase, { q, kind, category, target, tags, 
   });
 }
 
-export function getPublicStack(apiBase, slugOrId) {
-  return requestJson(apiBase, `/api/public/catalog/stacks/${encodeURIComponent(slugOrId)}`);
+export function getPublicBinder(apiBase, slugOrId) {
+  return requestJson(apiBase, `/api/public/catalog/binders/${encodeURIComponent(slugOrId)}`);
 }
 
-export function getPublicBinding(apiBase, slugOrId) {
-  return requestJson(apiBase, `/api/public/catalog/bindings/${encodeURIComponent(slugOrId)}`);
+export function getPublicSkill(apiBase, slugOrId) {
+  return requestJson(apiBase, `/api/public/catalog/skills/${encodeURIComponent(slugOrId)}`);
 }
 
-// The JSON-envelope route (StackExportResult: { content, contentType, fileName, ... }), not
+// The JSON-envelope route (BinderExportResult: { content, contentType, fileName, ... }), not
 // /export/file — that one returns the raw compiled bytes with a target-dependent content type
 // (text/markdown for Markdown/AgentsMd, application/json for SkillBundle), which only `.json()`
 // parses correctly for one of the three targets. The envelope always parses, and pull.mjs decides
 // what to do with .content based on the target it asked for.
-export function exportPublicStack(apiBase, slugOrId, target) {
-  return requestJson(apiBase, `/api/public/catalog/stacks/${encodeURIComponent(slugOrId)}/export`, {
+export function exportPublicBinder(apiBase, slugOrId, target) {
+  return requestJson(apiBase, `/api/public/catalog/binders/${encodeURIComponent(slugOrId)}/export`, {
     searchParams: { target }
   });
 }
 
-export function exportPublicBinding(apiBase, slugOrId, target) {
-  return requestJson(apiBase, `/api/public/catalog/bindings/${encodeURIComponent(slugOrId)}/export`, {
+export function exportPublicSkill(apiBase, slugOrId, target) {
+  return requestJson(apiBase, `/api/public/catalog/skills/${encodeURIComponent(slugOrId)}/export`, {
     searchParams: { target }
   });
 }
@@ -213,35 +213,35 @@ export function exportPublicBinding(apiBase, slugOrId, target) {
 // --- Your workspace (requires a token from `bindry login`) ---
 
 /**
- * Pushes a repository's rules folder to a Stack (BIND-0197). Reconciliation happens server-side: this
+ * Pushes a repository's rules folder to a Binder (BIND-0197). Reconciliation happens server-side: this
  * sends the whole folder and gets back a per-file report of what was created, versioned, left alone, or
  * no longer present.
  */
 export function publishFromSource(apiBase, token, payload) {
-  return requestJson(apiBase, '/api/stacks/from-source', { token, body: payload });
+  return requestJson(apiBase, '/api/binders/from-source', { token, body: payload });
 }
 
-export function listMyStacks(apiBase, token, { includeArchived } = {}) {
-  return requestJson(apiBase, '/api/stacks', { token, searchParams: { includeArchived } });
+export function listMyBinders(apiBase, token, { includeArchived } = {}) {
+  return requestJson(apiBase, '/api/binders', { token, searchParams: { includeArchived } });
 }
 
-export function getMyStack(apiBase, token, stackId) {
-  return requestJson(apiBase, `/api/stacks/${encodeURIComponent(stackId)}`, { token });
+export function getMyBinder(apiBase, token, binderId) {
+  return requestJson(apiBase, `/api/binders/${encodeURIComponent(binderId)}`, { token });
 }
 
-export function exportMyStack(apiBase, token, stackId, target) {
-  return requestJson(apiBase, `/api/stacks/${encodeURIComponent(stackId)}/export`, {
+export function exportMyBinder(apiBase, token, binderId, target) {
+  return requestJson(apiBase, `/api/binders/${encodeURIComponent(binderId)}/export`, {
     token,
     searchParams: { target }
   });
 }
 
-export function getMyBinding(apiBase, token, bindingId) {
-  return requestJson(apiBase, `/api/bindings/${encodeURIComponent(bindingId)}`, { token });
+export function getMySkill(apiBase, token, skillId) {
+  return requestJson(apiBase, `/api/skills/${encodeURIComponent(skillId)}`, { token });
 }
 
-export function exportMyBinding(apiBase, token, bindingId, target) {
-  return requestJson(apiBase, `/api/bindings/${encodeURIComponent(bindingId)}/export`, {
+export function exportMySkill(apiBase, token, skillId, target) {
+  return requestJson(apiBase, `/api/skills/${encodeURIComponent(skillId)}/export`, {
     token,
     searchParams: { target }
   });
@@ -249,59 +249,59 @@ export function exportMyBinding(apiBase, token, bindingId, target) {
 
 export const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// Resolves a Stack's detail by GUID or slug, the same "yours first, then public" order the plugin
-// compilers already use: a token only ever helps here, it never blocks a public Stack.
-export async function resolveStackDetail(apiBase, token, slugOrId) {
+// Resolves a Binder's detail by GUID or slug, the same "yours first, then public" order the plugin
+// compilers already use: a token only ever helps here, it never blocks a public Binder.
+export async function resolveBinderDetail(apiBase, token, slugOrId) {
   if (token && GUID_PATTERN.test(slugOrId)) {
     try {
-      return { source: 'private', detail: await getMyStack(apiBase, token, slugOrId) };
+      return { source: 'private', detail: await getMyBinder(apiBase, token, slugOrId) };
     } catch (err) {
       if (!(err instanceof BindryApiError) || (err.status !== 401 && err.status !== 403 && err.status !== 404)) {
         throw err;
       }
-      // Falls through to the public route below — same reasoning as compile-stack.mjs's fetchLive.
+      // Falls through to the public route below — same reasoning as compile-binder.mjs's fetchLive.
     }
   }
-  return { source: 'public', detail: await getPublicStack(apiBase, slugOrId) };
+  return { source: 'public', detail: await getPublicBinder(apiBase, slugOrId) };
 }
 
-export async function resolveStackExport(apiBase, token, slugOrId, target) {
+export async function resolveBinderExport(apiBase, token, slugOrId, target) {
   if (token && GUID_PATTERN.test(slugOrId)) {
     try {
-      return { source: 'private', stack: await exportMyStack(apiBase, token, slugOrId, target) };
+      return { source: 'private', binder: await exportMyBinder(apiBase, token, slugOrId, target) };
     } catch (err) {
       if (!(err instanceof BindryApiError) || (err.status !== 401 && err.status !== 403 && err.status !== 404)) {
         throw err;
       }
     }
   }
-  return { source: 'public', stack: await exportPublicStack(apiBase, slugOrId, target) };
+  return { source: 'public', binder: await exportPublicBinder(apiBase, slugOrId, target) };
 }
 
-// Same "yours first, then public" resolution as resolveStackExport, for a standalone Binding.
-export async function resolveBindingExport(apiBase, token, slugOrId, target) {
+// Same "yours first, then public" resolution as resolveBinderExport, for a standalone Skill.
+export async function resolveSkillExport(apiBase, token, slugOrId, target) {
   if (token && GUID_PATTERN.test(slugOrId)) {
     try {
-      return { source: 'private', binding: await exportMyBinding(apiBase, token, slugOrId, target) };
+      return { source: 'private', skill: await exportMySkill(apiBase, token, slugOrId, target) };
     } catch (err) {
       if (!(err instanceof BindryApiError) || (err.status !== 401 && err.status !== 403 && err.status !== 404)) {
         throw err;
       }
     }
   }
-  return { source: 'public', binding: await exportPublicBinding(apiBase, slugOrId, target) };
+  return { source: 'public', skill: await exportPublicSkill(apiBase, slugOrId, target) };
 }
 
-// Same "yours first, then public" resolution as resolveStackDetail, for a standalone Binding.
-export async function resolveBindingDetail(apiBase, token, slugOrId) {
+// Same "yours first, then public" resolution as resolveBinderDetail, for a standalone Skill.
+export async function resolveSkillDetail(apiBase, token, slugOrId) {
   if (token && GUID_PATTERN.test(slugOrId)) {
     try {
-      return { source: 'private', detail: await getMyBinding(apiBase, token, slugOrId) };
+      return { source: 'private', detail: await getMySkill(apiBase, token, slugOrId) };
     } catch (err) {
       if (!(err instanceof BindryApiError) || (err.status !== 401 && err.status !== 403 && err.status !== 404)) {
         throw err;
       }
     }
   }
-  return { source: 'public', detail: await getPublicBinding(apiBase, slugOrId) };
+  return { source: 'public', detail: await getPublicSkill(apiBase, slugOrId) };
 }

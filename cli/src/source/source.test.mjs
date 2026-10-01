@@ -13,8 +13,8 @@ import { join } from 'node:path';
 import {
   readSourceFolder,
   writeSourceFolder,
-  stackDocumentFrom,
-  bindingDocumentFrom,
+  binderDocumentFrom,
+  skillDocumentFrom,
   textFrom,
   linesFor
 } from './format.mjs';
@@ -22,8 +22,8 @@ import { tidyRemote } from './gitref.mjs';
 
 const TOKEN = 'test-token';
 
-/** A full Binding as the workspace API returns it — every field an author owns, plus server-side state. */
-function apiBinding(slug, instructions) {
+/** A full Skill as the workspace API returns it — every field an author owns, plus server-side state. */
+function apiSkill(slug, instructions) {
   return {
     id: '11111111-1111-1111-1111-111111111111',
     workspaceId: '22222222-2222-2222-2222-222222222222',
@@ -50,9 +50,9 @@ function apiBinding(slug, instructions) {
 function makeFolder({ instructions = 'Audit every service operation.' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'bindry-source-'));
   const dir = join(root, '.bindry');
-  mkdirSync(join(dir, 'bindings'), { recursive: true });
+  mkdirSync(join(dir, 'skills'), { recursive: true });
 
-  writeFileSync(join(dir, 'stack.json'), JSON.stringify({
+  writeFileSync(join(dir, 'binder.json'), JSON.stringify({
     slug: 'ibeam-architecture',
     title: 'IBeam Architecture',
     summary: 'How IBeam services are built.',
@@ -65,7 +65,7 @@ function makeFolder({ instructions = 'Audit every service operation.' } = {}) {
     trust: {}
   }, null, 2), 'utf8');
 
-  writeFileSync(join(dir, 'bindings', 'service-layer-auditing.json'), JSON.stringify({
+  writeFileSync(join(dir, 'skills', 'service-layer-auditing.json'), JSON.stringify({
     slug: 'service-layer-auditing',
     title: 'Service layer auditing',
     summary: 'Audit at the service layer.',
@@ -100,20 +100,20 @@ function startFakeApi({ status = 200, body } = {}) {
       res.end(JSON.stringify(payload));
     };
 
-    if (req.url === '/api/stacks/from-source' && req.method === 'POST') {
+    if (req.url === '/api/binders/from-source' && req.method === 'POST') {
       if (req.headers['x-api-key'] !== TOKEN) return json(401, { error: 'unauthorized' });
       const payload = JSON.parse(raw);
       received.push(payload);
       if (status !== 200) return json(status, body);
       return json(200, body ?? {
-        stackId: '33333333-3333-3333-3333-333333333333',
-        stackSlug: payload.stack.slug,
-        stackAction: 'created',
-        publishedVersion: payload.publish ? payload.stackVersion : '',
-        bindings: payload.bindings.map((document) => ({
-          slug: document.binding.slug,
+        binderId: '33333333-3333-3333-3333-333333333333',
+        binderSlug: payload.binder.slug,
+        binderAction: 'created',
+        publishedVersion: payload.publish ? payload.binderVersion : '',
+        skills: payload.skills.map((document) => ({
+          slug: document.skill.slug,
           path: document.path,
-          bindingId: '11111111-1111-1111-1111-111111111111',
+          skillId: '11111111-1111-1111-1111-111111111111',
           action: 'created',
           version: '1.0.0',
           message: ''
@@ -142,49 +142,49 @@ async function withApi(options, fn) {
   }
 }
 
-test('a rules folder reads back as the Stack plus its Bindings, in filename order', async () => {
+test('a rules folder reads back as the Binder plus its Skills, in filename order', async () => {
   await withFolder(({ dir }) => {
-    mkdirSync(join(dir, 'bindings'), { recursive: true });
-    writeFileSync(join(dir, 'bindings', 'a-first-rule.json'), JSON.stringify({ slug: 'a-first-rule', title: 'First', instructions: 'Do this.' }), 'utf8');
+    mkdirSync(join(dir, 'skills'), { recursive: true });
+    writeFileSync(join(dir, 'skills', 'a-first-rule.json'), JSON.stringify({ slug: 'a-first-rule', title: 'First', instructions: 'Do this.' }), 'utf8');
 
     const folder = readSourceFolder(dir);
 
-    assert.equal(folder.stack.slug, 'ibeam-architecture');
-    assert.deepEqual(folder.bindings.map((item) => item.binding.slug), ['a-first-rule', 'service-layer-auditing']);
+    assert.equal(folder.binder.slug, 'ibeam-architecture');
+    assert.deepEqual(folder.skills.map((item) => item.skill.slug), ['a-first-rule', 'service-layer-auditing']);
     // The path is recorded per document so the app can point a reader at the real file.
-    assert.equal(folder.bindings[1].path, '.bindry/bindings/service-layer-auditing.json');
+    assert.equal(folder.skills[1].path, '.bindry/skills/service-layer-auditing.json');
     assert.deepEqual(folder.problems, []);
   });
 });
 
 test('instructions may be an array of lines, so a prose diff is reviewable', async () => {
   await withFolder(({ dir }) => {
-    writeFileSync(join(dir, 'bindings', 'multi.json'), JSON.stringify({
+    writeFileSync(join(dir, 'skills', 'multi.json'), JSON.stringify({
       slug: 'multi',
       title: 'Multi',
       instructions: ['First line.', '', 'Second line.']
     }), 'utf8');
 
     const folder = readSourceFolder(dir);
-    const multi = folder.bindings.find((item) => item.binding.slug === 'multi');
+    const multi = folder.skills.find((item) => item.skill.slug === 'multi');
 
-    assert.equal(multi.binding.instructions, 'First line.\n\nSecond line.');
+    assert.equal(multi.skill.instructions, 'First line.\n\nSecond line.');
   });
 });
 
 test('one unreadable file is reported rather than sinking the whole folder', async () => {
   await withFolder(({ dir }) => {
-    writeFileSync(join(dir, 'bindings', 'broken.json'), '{ not json', 'utf8');
+    writeFileSync(join(dir, 'skills', 'broken.json'), '{ not json', 'utf8');
 
     const folder = readSourceFolder(dir);
 
-    assert.equal(folder.bindings.length, 1, 'the good file still read');
+    assert.equal(folder.skills.length, 1, 'the good file still read');
     assert.equal(folder.problems.length, 1);
     assert.match(folder.problems[0].reason, /not valid JSON/);
   });
 });
 
-test('a folder with no stack.json says what is missing instead of publishing nothing', async () => {
+test('a folder with no binder.json says what is missing instead of publishing nothing', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bindry-source-empty-'));
   try {
     assert.throws(() => readSourceFolder(root), /needs one/);
@@ -193,12 +193,12 @@ test('a folder with no stack.json says what is missing instead of publishing not
   }
 });
 
-test('a Stack and its Bindings round-trip through the folder without loss', async () => {
+test('a Binder and its Skills round-trip through the folder without loss', async () => {
   // The claim this format has to earn: eject then publish must send the API exactly what it had. Written
   // against the full workspace shapes, not the public export, which carries only what a consumer compiles.
   const root = mkdtempSync(join(tmpdir(), 'bindry-roundtrip-'));
   try {
-    const stack = {
+    const binder = {
       id: '44444444-4444-4444-4444-444444444444',
       slug: 'ibeam-architecture',
       title: 'IBeam Architecture',
@@ -213,22 +213,22 @@ test('a Stack and its Bindings round-trip through the folder without loss', asyn
       tokenEstimate: { estimated: 80, alwaysLoaded: 0, taskLoaded: 80 },
       trust: { reviewed: false, riskLevel: 'Low', provenance: '', labels: [] }
     };
-    const binding = apiBinding('service-layer-auditing', 'Audit every service operation.\n\nEven the reads.');
+    const skill = apiSkill('service-layer-auditing', 'Audit every service operation.\n\nEven the reads.');
 
-    const stackDocument = stackDocumentFrom(stack);
-    const bindingDocument = bindingDocumentFrom(binding);
-    writeSourceFolder(join(root, '.bindry'), { stack: stackDocument, bindings: [bindingDocument] });
+    const binderDocument = binderDocumentFrom(binder);
+    const skillDocument = skillDocumentFrom(skill);
+    writeSourceFolder(join(root, '.bindry'), { binder: binderDocument, skills: [skillDocument] });
 
     const folder = readSourceFolder(join(root, '.bindry'));
 
-    assert.deepEqual(folder.stack, stackDocument);
-    assert.deepEqual(folder.bindings[0].binding, bindingDocument);
+    assert.deepEqual(folder.binder, binderDocument);
+    assert.deepEqual(folder.skills[0].skill, skillDocument);
     // Including the newlines inside the prose, which is the part the lines representation touches.
-    assert.equal(folder.bindings[0].binding.instructions, 'Audit every service operation.\n\nEven the reads.');
+    assert.equal(folder.skills[0].skill.instructions, 'Audit every service operation.\n\nEven the reads.');
 
     // And server-side state is deliberately not in the folder: a repo does not get to assert its own
     // review status, token estimate, or published version.
-    const onDisk = JSON.parse(readFileSync(join(root, '.bindry', 'bindings', 'service-layer-auditing.json'), 'utf8'));
+    const onDisk = JSON.parse(readFileSync(join(root, '.bindry', 'skills', 'service-layer-auditing.json'), 'utf8'));
     assert.equal(onDisk.status, undefined);
     assert.equal(onDisk.currentVersion, undefined);
     assert.equal(onDisk.id, undefined);
@@ -237,18 +237,18 @@ test('a Stack and its Bindings round-trip through the folder without loss', asyn
   }
 });
 
-test('writing a folder clears Bindings that are no longer in the Stack', async () => {
+test('writing a folder clears Skills that are no longer in the Binder', async () => {
   const root = mkdtempSync(join(tmpdir(), 'bindry-stale-'));
   try {
     const dir = join(root, '.bindry');
-    writeSourceFolder(dir, { stack: { slug: 's' }, bindings: [{ slug: 'kept', instructions: 'a' }, { slug: 'dropped', instructions: 'b' }] });
-    assert.ok(existsSync(join(dir, 'bindings', 'dropped.json')));
+    writeSourceFolder(dir, { binder: { slug: 's' }, skills: [{ slug: 'kept', instructions: 'a' }, { slug: 'dropped', instructions: 'b' }] });
+    assert.ok(existsSync(join(dir, 'skills', 'dropped.json')));
 
-    writeSourceFolder(dir, { stack: { slug: 's' }, bindings: [{ slug: 'kept', instructions: 'a' }] });
+    writeSourceFolder(dir, { binder: { slug: 's' }, skills: [{ slug: 'kept', instructions: 'a' }] });
 
     // A stale file left behind would be read by the next publish as a rule that still exists.
-    assert.ok(!existsSync(join(dir, 'bindings', 'dropped.json')));
-    assert.ok(existsSync(join(dir, 'bindings', 'kept.json')));
+    assert.ok(!existsSync(join(dir, 'skills', 'dropped.json')));
+    assert.ok(existsSync(join(dir, 'skills', 'kept.json')));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -264,9 +264,9 @@ test('publish sends the folder whole, with the repository and commit it came fro
       const payload = received[0];
       assert.equal(payload.sourceRef.repository, 'github.com/acme/api');
       assert.equal(payload.sourceRef.revision, 'abc1234');
-      assert.equal(payload.stack.slug, 'ibeam-architecture');
-      assert.equal(payload.bindings.length, 1);
-      assert.equal(payload.bindings[0].binding.instructions, 'Audit every service operation.');
+      assert.equal(payload.binder.slug, 'ibeam-architecture');
+      assert.equal(payload.skills.length, 1);
+      assert.equal(payload.skills[0].skill.instructions, 'Audit every service operation.');
       // Staged unless asked otherwise.
       assert.equal(payload.publish, false);
     });
@@ -296,7 +296,7 @@ test('publish --publish requires a version rather than guessing one', async () =
 
       await assert.rejects(
         () => publish({ apiBase, token: TOKEN, dir, publish: true, repository: 'github.com/acme/api' }),
-        /--stack-version/
+        /--binder-version/
       );
       assert.equal(received.length, 0, 'nothing was sent');
     });
@@ -313,7 +313,7 @@ test('publish --dry-run sends nothing and needs no key', async () => {
       assert.equal(received.length, 0);
       const payload = JSON.parse(logs.at(-1));
       assert.equal(payload.event, 'publish_preview');
-      assert.equal(payload.payload.bindings.length, 1);
+      assert.equal(payload.payload.skills.length, 1);
     });
   });
 });
@@ -333,11 +333,11 @@ test('publishing for real without a key refuses instead of silently doing nothin
 
 test('a failed document makes the command exit non-zero, so CI notices', async () => {
   const body = {
-    stackId: '33333333-3333-3333-3333-333333333333',
-    stackSlug: 'ibeam-architecture',
-    stackAction: 'updated',
+    binderId: '33333333-3333-3333-3333-333333333333',
+    binderSlug: 'ibeam-architecture',
+    binderAction: 'updated',
     publishedVersion: '',
-    bindings: [{ slug: 'service-layer-auditing', path: '.bindry/bindings/service-layer-auditing.json', bindingId: '1', action: 'failed', version: '', message: 'Instructions are required.' }],
+    skills: [{ slug: 'service-layer-auditing', path: '.bindry/skills/service-layer-auditing.json', skillId: '1', action: 'failed', version: '', message: 'Instructions are required.' }],
     removed: []
   };
   await withApi({ body }, async ({ apiBase, logs }) => {
@@ -356,14 +356,14 @@ test('a failed document makes the command exit non-zero, so CI notices', async (
 });
 
 test('a rejected push surfaces the API field error, not just the status code', async () => {
-  const body = { title: 'One or more validation errors occurred.', errors: { Stack: ['The Stack needs a slug.'] } };
+  const body = { title: 'One or more validation errors occurred.', errors: { Binder: ['The Binder needs a slug.'] } };
   await withApi({ status: 400, body }, async ({ apiBase }) => {
     await withFolder(async ({ dir }) => {
       const { publish } = await import('../commands/publish.mjs');
 
       await assert.rejects(
         () => publish({ apiBase, token: TOKEN, dir, repository: 'github.com/acme/api' }),
-        /The Stack needs a slug/
+        /The Binder needs a slug/
       );
     });
   });
@@ -396,4 +396,51 @@ test('the lines convention is only used where it helps', () => {
   assert.deepEqual(linesFor('two\nlines'), ['two', 'lines']);
   assert.equal(textFrom(['two', 'lines']), 'two\nlines');
   assert.equal(textFrom(undefined), '');
+});
+
+// F1 decision 1 accepted a hard break on one explicit condition: failures must name the upgrade
+// rather than being cryptic. A rules folder is written by the developer, not by Bindry, so someone
+// who wrote forty rule files and upgraded the CLI must not be told their folder is missing a file
+// they never knew existed.
+test('a rules folder written by 0.1.x says so, instead of reporting a missing binder.json', () => {
+  const root = mkdtempSync(join(tmpdir(), 'bindry-legacy-'));
+  const dir = join(root, '.bindry');
+  mkdirSync(join(dir, 'bindings'), { recursive: true });
+  writeFileSync(join(dir, 'stack.json'), JSON.stringify({ slug: 'ibeam-architecture' }), 'utf8');
+  writeFileSync(join(dir, 'bindings', 'service-layer-auditing.json'), JSON.stringify({ slug: 'service-layer-auditing' }), 'utf8');
+
+  try {
+    assert.throws(
+      () => readSourceFolder(dir),
+      (err) => {
+        // The two things the message has to carry: that 0.2.0 is the cause, and what to do about it.
+        assert.match(err.message, /0\.2\.0/);
+        assert.match(err.message, /stack\.json/);
+        assert.match(err.message, /binder\.json/);
+        assert.match(err.message, /bindings\//);
+        assert.match(err.message, /skills\//);
+        // And what it must NOT be: the bare "no binder.json" that sent 0.1.x users looking for a
+        // file they never wrote.
+        assert.ok(!/^no binder\.json/.test(err.message), 'must not lead with the bare missing-file error');
+        return true;
+      }
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an empty folder still gets the plain missing-file error, not the upgrade message', () => {
+  // The legacy path must not swallow the ordinary case — someone running publish in the wrong
+  // directory should be told a rules folder needs a binder.json, not that they need to upgrade.
+  const root = mkdtempSync(join(tmpdir(), 'bindry-empty-'));
+  const dir = join(root, '.bindry');
+  mkdirSync(dir, { recursive: true });
+
+  try {
+    assert.throws(() => readSourceFolder(dir), /no binder\.json/);
+    assert.throws(() => readSourceFolder(dir), (err) => !/0\.2\.0/.test(err.message));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
