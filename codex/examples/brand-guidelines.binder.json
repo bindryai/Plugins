@@ -1,10 +1,10 @@
 {
-  "stackId": "stk_brand_guidelines",
+  "binderId": "stk_brand_guidelines",
   "slug": "brand-guidelines",
   "title": "Brand Guidelines",
   "summary": "House visual identity rules, including the exact logo file to place in generated assets.",
   "tokenEstimate": 210,
-  "bindings": [
+  "skills": [
     {
       "id": "bnd_brand_voice",
       "slug": "brand-voice",

@@ -1,6 +1,6 @@
 // Spawns the real CLI as a subprocess for the cases that are actually about the process boundary —
 // argv parsing and exit codes — rather than importing main() directly, which would need it guarded
-// against running on import the way the plugins' own compile-stack.mjs guards itself. This is also
+// against running on import the way the plugins' own compile-binder.mjs guards itself. This is also
 // exactly the layer that had two real bugs during development (--help/--version being swallowed as
 // "flag expects a value", and --version never being reached because the no-command branch ran
 // first) — a unit test on parseArgs alone would not have caught either, since both were about how

@@ -4,8 +4,8 @@ description: One-time setup connecting GitHub Copilot to the Bindry MCP server, 
 ---
 
 Connect this machine to the Bindry MCP server so `--mode live` skills (compiled by the `/bindry-sync` skill)
-actually work. This is a one-time, per-machine/user step — it isn't tied to any particular project or Stack,
-and only needs to happen once even if the user syncs several Stacks live later.
+actually work. This is a one-time, per-machine/user step — it isn't tied to any particular project or Binder,
+and only needs to happen once even if the user syncs several Binders live later.
 
 1. Explain up front: this needs an API key — the same one already used for pinned `/bindry-sync` works here
    too, no separate scope or permission to grant. Generate one from the workspace's team page in Bindry (not
@@ -22,11 +22,11 @@ and only needs to happen once even if the user syncs several Stacks live later.
    ```
 4. After running it, confirm with `copilot mcp get bindry` — it should list `bindry` as enabled with the
    `/api/mcp` URL. That only proves the entry was saved, not that the server accepted the key: the real test is
-   calling a Bindry MCP tool (e.g. `bindry.bindings.get`) in a new session. If that fails, report exactly what
+   calling a Bindry MCP tool (e.g. `bindry.skills.get`) in a new session. If that fails, report exactly what
    it said (bad API base, network issue, or an invalid/expired key show up as different failures — don't guess
    which without checking). If it fails with an authentication error even though `BINDRY_API_TOKEN` is set in
    the environment Copilot was started from, say so plainly — the variable reference may not have been
    expanded — rather than silently writing the raw key into the config.
-5. Once connected, tell the user live-mode skills are ready to use — syncing a Stack with `--mode live` will now
+5. Once connected, tell the user live-mode skills are ready to use — syncing a Binder with `--mode live` will now
    compile skills the agent can actually call MCP tools through, and the `/bindry-check` skill will report them
    as "live (always current)" rather than stale or unknown.
