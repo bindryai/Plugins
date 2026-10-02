@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderSkill, renderPinComment, renderLiveComment, parsePinComment, parseLiveComment, hasLegacyComment, slugify } from './compile.mjs';
+import { renderSkill, renderPinComment, renderLiveComment, parsePinComment, parseLiveComment, hasLegacyComment, slugify, preamblePathFor, preambleBlockPattern, splicePreamble, removePreamble } from './compile.mjs';
 
 const binder = { slug: 'git-flow', title: 'Git Flow' };
 const skill = {
@@ -144,4 +144,122 @@ test('the cap never shortens the title or the "use when" clause', () => {
 
   assert.ok(described.includes(head), 'the existing clause must survive in full');
   assert.ok(!described.includes('Not for:'), 'nothing is added when there is no room for it');
+});
+
+// --- BIND-0240: the always-on block, spliced into a file the user owns -------------------------
+//
+// These functions edit CLAUDE.md and AGENTS.md — files people wrote by hand, that long predate
+// Bindry, and that may hold more than one Binder's block. Every test here is about not damaging
+// something that was not ours to touch.
+
+const BLOCK = (slug, body) =>
+  [
+    `<!-- bindry:preamble binder=${slug} version=1.0.0 -->`,
+    '<!-- Managed by Bindry. Edits inside this block are overwritten on the next sync. -->',
+    '',
+    body,
+    '',
+    `<!-- /bindry:preamble binder=${slug} -->`
+  ].join('\n');
+
+test('each host gets its own always-on file', () => {
+  assert.equal(preamblePathFor('claude-code'), 'CLAUDE.md');
+  assert.equal(preamblePathFor('codex'), 'AGENTS.md');
+  // Copilot reads AGENTS.md too, so it deliberately gets its own file: a repo with both the Codex
+  // and Copilot plugins would otherwise apply the same persona twice to the same agent.
+  assert.equal(preamblePathFor('copilot'), '.github/copilot-instructions.md');
+});
+
+test('an empty file just gets the block', () => {
+  const result = splicePreamble('', BLOCK('house-style', 'Write plainly.'), 'house-style');
+
+  assert.ok(result.startsWith('<!-- bindry:preamble binder=house-style'));
+  assert.ok(result.endsWith('\n'));
+});
+
+test("a hand-written file keeps every byte it had", () => {
+  // The one that matters most. People keep real instructions in CLAUDE.md, and a tool that
+  // clobbered them would destroy work that was never ours.
+  const existing = '# My project\n\nAlways run the linter before committing.\n';
+
+  const result = splicePreamble(existing, BLOCK('house-style', 'Write plainly.'), 'house-style');
+
+  assert.ok(result.startsWith(existing.trimEnd()));
+  assert.match(result, /Always run the linter before committing\./);
+  assert.match(result, /bindry:preamble binder=house-style/);
+});
+
+test('compiling twice changes nothing the second time', () => {
+  // Idempotency is what keeps this out of the user's diff. A block that rewrote itself every sync
+  // would show up as a change in every commit and train people to ignore it.
+  const once = splicePreamble('# My project\n', BLOCK('house-style', 'Write plainly.'), 'house-style');
+  const twice = splicePreamble(once, BLOCK('house-style', 'Write plainly.'), 'house-style');
+
+  assert.equal(twice, once);
+});
+
+test('an updated preamble replaces the block in place', () => {
+  const before = splicePreamble('# My project\n', BLOCK('house-style', 'Write plainly.'), 'house-style');
+  const after = splicePreamble(before, BLOCK('house-style', 'Write in British English.'), 'house-style');
+
+  assert.match(after, /Write in British English\./);
+  assert.doesNotMatch(after, /Write plainly\./);
+  // Count OPENING markers only — the closing marker also contains "bindry:preamble binder=".
+  assert.equal(after.match(/<!-- bindry:preamble binder=house-style/g).length, 1);
+  assert.match(after, /# My project/);
+});
+
+test('two Binders coexist, and updating one leaves the other untouched', () => {
+  // The whole point of keying the block by slug. Without it the second Binder's compile would
+  // silently delete the first Binder's persona, with no error and nothing on screen.
+  let file = splicePreamble('', BLOCK('acme-voice', 'Be warm.'), 'acme-voice');
+  file = splicePreamble(file, BLOCK('platform-standards', 'Be precise.'), 'platform-standards');
+
+  const updated = splicePreamble(file, BLOCK('acme-voice', 'Be warmer.'), 'acme-voice');
+
+  assert.match(updated, /Be warmer\./);
+  assert.match(updated, /Be precise\./);
+  assert.doesNotMatch(updated, /Be warm\.\n/);
+  assert.equal(updated.match(/<!-- bindry:preamble binder=/g).length, 2);
+});
+
+test('a slug that is a prefix of another does not eat its block', () => {
+  // `binder=acme` must not match `binder=acme-voice`.
+  //
+  // ORDER MATTERS, and this is the order that actually exercises it. With the longer slug FIRST,
+  // a pattern lacking the whitespace guard starts matching at acme-voice's OPENING marker and runs
+  // to acme's CLOSING marker — swallowing both blocks and deleting a different Binder's persona.
+  // With the short slug first it accidentally still works, which is why the first version of this
+  // test passed against the broken pattern.
+  let file = splicePreamble('', BLOCK('acme-voice', 'Long.'), 'acme-voice');
+  file = splicePreamble(file, BLOCK('acme', 'Short.'), 'acme');
+
+  const updated = splicePreamble(file, BLOCK('acme', 'Short, revised.'), 'acme');
+
+  assert.match(updated, /Short, revised\./);
+  assert.match(updated, /Long\./);
+  assert.equal(updated.match(/<!-- bindry:preamble binder=/g).length, 2);
+});
+
+test('an uninstall removes only its own block and leaves no gap', () => {
+  let file = splicePreamble('# My project\n', BLOCK('acme-voice', 'Be warm.'), 'acme-voice');
+  file = splicePreamble(file, BLOCK('platform-standards', 'Be precise.'), 'platform-standards');
+
+  const result = removePreamble(file, 'acme-voice');
+
+  assert.doesNotMatch(result, /Be warm\./);
+  assert.match(result, /Be precise\./);
+  assert.match(result, /# My project/);
+  assert.doesNotMatch(result, /\n{3,}/);
+});
+
+test('removing a block that is not there is a no-op', () => {
+  const existing = '# My project\n';
+  assert.equal(removePreamble(existing, 'never-installed'), existing);
+});
+
+test('a malformed slug throws rather than silently matching nothing', () => {
+  // A pattern that cannot match looks exactly like "this Binder has no block yet", so a compile
+  // would append a second one every run. Better to fail loudly at the caller.
+  assert.throws(() => preambleBlockPattern('Not A Slug'), /not a valid Binder slug/);
 });
