@@ -444,3 +444,27 @@ test('an empty folder still gets the plain missing-file error, not the upgrade m
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// --- BIND-0239: the Binder's always-on instructions survive the round trip ----------------------
+
+test('a binder.json round trip keeps the always-on instructions', () => {
+  // The eject -> edit -> publish loop is lossy by omission: anything binderDocumentFrom does not
+  // name is silently dropped, so a Binder ejected and republished would come back with its persona
+  // removed, and nothing on screen would say so.
+  const document = binderDocumentFrom({
+    slug: 'house-style',
+    title: 'House Style',
+    summary: 'How we write.',
+    preamble: 'Write in British English. Never use bullet lists.'
+  });
+
+  assert.equal(document.preamble, 'Write in British English. Never use bullet lists.');
+});
+
+test('a Binder with no always-on instructions ejects an empty string, not undefined', () => {
+  // Absence has to round-trip as absence. `undefined` disappears from the JSON entirely, and a
+  // reader then cannot tell "never set" from "deliberately cleared".
+  const document = binderDocumentFrom({ slug: 'house-style', title: 'House Style' });
+
+  assert.equal(document.preamble, '');
+});
