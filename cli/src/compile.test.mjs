@@ -21,7 +21,7 @@ test('renderSkill (pinned) embeds a parseable pin comment and the instructions',
   assert.ok(out.includes('Verify before finishing:'));
 
   const pin = parsePinComment(out);
-  assert.deepEqual(pin, { binder: 'git-flow', skill: skill.id, version: '3' });
+  assert.deepEqual(pin, { binder: 'git-flow', skill: skill.id, version: '3', binderVersion: null });
   assert.equal(parseLiveComment(out), null);
 });
 
@@ -39,7 +39,8 @@ test('renderPinComment/renderLiveComment round-trip through their own parsers', 
   assert.deepEqual(parsePinComment(renderPinComment(binder, skill)), {
     binder: binder.slug,
     skill: skill.id,
-    version: skill.version
+    version: skill.version,
+    binderVersion: null
   });
   assert.deepEqual(parseLiveComment(renderLiveComment(binder, skill)), {
     binder: binder.slug,
@@ -47,10 +48,32 @@ test('renderPinComment/renderLiveComment round-trip through their own parsers', 
   });
 });
 
+test('a pin written before binder-version existed still parses (BIND-0252)', () => {
+  // The regex gained an optional trailing field. Every SKILL.md already on disk was written without
+  // it, and a pin that stops parsing reads to the user as "no compiled skills found" against a
+  // folder full of them — with nothing on screen connecting that to a CLI upgrade.
+  const legacy = '<!-- bindry:pin binder=git-flow skill=aaaa-1111 version=3 -->';
+
+  assert.deepEqual(parsePinComment(legacy), {
+    binder: 'git-flow',
+    skill: 'aaaa-1111',
+    version: '3',
+    binderVersion: null
+  });
+});
+
+test('a pin records the Binder version it came from when one was pinned (BIND-0252)', () => {
+  const pinned = parsePinComment(renderPinComment({ slug: 'git-flow', version: '2.1.0' }, skill));
+
+  assert.equal(pinned.binderVersion, '2.1.0');
+  // The skill's own version still says what the file contains — the two answer different questions.
+  assert.equal(pinned.version, skill.version);
+});
+
 test('a standalone Skill (no Binder, BIND-0190) renders and parses with binder: null', () => {
   const out = renderSkill(null, skill, 'pinned');
   const pin = parsePinComment(out);
-  assert.deepEqual(pin, { binder: null, skill: skill.id, version: '3' });
+  assert.deepEqual(pin, { binder: null, skill: skill.id, version: '3', binderVersion: null });
   assert.ok(!out.includes('binder='), 'a standalone pull must not fabricate a binder= field');
 
   const live = renderLiveComment(null, skill);
