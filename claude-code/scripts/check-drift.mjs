@@ -15,6 +15,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { fail, readConfig, parsePinComment, parseLiveComment, GUID_PATTERN } from './compile-binder.mjs';
 
 function parseArgs(argv) {
@@ -79,6 +80,7 @@ async function fetchBinderState(binderId, apiBase, token, version) {
         versionBySkillId: new Map((detail.skills ?? []).map((b) => [b.skillId, b.pinnedVersion])),
         pinnedVersion: null,
         currentVersion: detail.binder?.currentVersion ?? '',
+        slug: detail.binder?.slug ?? '',
         source: 'your workspace'
       };
     }
@@ -122,6 +124,7 @@ async function fetchBinderState(binderId, apiBase, token, version) {
     versionBySkillId: new Map((bundle.skills ?? []).map((b) => [b.id, b.version])),
     pinnedVersion: envelope.version || null,
     currentVersion: envelope.currentVersion ?? '',
+    slug: bundle.slug ?? '',
     source: envelope.version ? `the Library, pinned to ${envelope.version}` : 'the Library'
   };
 }
@@ -227,6 +230,71 @@ async function main() {
   } else if (state.pinnedVersion) {
     console.log(`bindry: pinned to ${state.pinnedVersion}, which is the newest published version.`);
   }
+
+  reportAlwaysOnBlocks(process.cwd(), state.slug, state.currentVersion);
 }
 
-main();
+
+// --- Always-on blocks (BIND-0243) --------------------------------------------------------------
+//
+// Skills live one-per-directory, so they never collide. The always-on block does: every Binder
+// installed into a repo keeps its block in the SAME file, and nothing anywhere tracks the full set.
+// That is what makes them worth reporting — a block acts on every single turn, and until now the
+// only way to know what was in there was to open the file and read it.
+//
+// All three candidate files are scanned rather than just this plugin's own. A repo with more than
+// one plugin installed genuinely has more than one, and showing only ours would under-report what
+// is actually acting on the agent.
+const ALWAYS_ON_FILES = ['CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md'];
+
+const PREAMBLE_MARKER = /<!--\s*bindry:preamble\s+binder=([a-z0-9-]+)(?:\s+version=(\S+))?\s*-->/g;
+
+export function readAlwaysOnBlocks(root) {
+  const found = [];
+  for (const relative of ALWAYS_ON_FILES) {
+    const path = join(root, relative);
+    if (!existsSync(path)) continue;
+
+    const contents = readFileSync(path, 'utf8');
+    for (const match of contents.matchAll(PREAMBLE_MARKER)) {
+      found.push({ file: relative, slug: match[1], version: match[2] ?? '' });
+    }
+  }
+  return found;
+}
+
+/**
+ * Reports the always-on blocks in this repo.
+ *
+ * Deliberately does NOT call another Binder's block orphaned. This script knows about exactly one
+ * Binder — the one in bindry.config.json — so a block belonging to a different slug may be a
+ * perfectly healthy second Binder or may be left over from one that was removed, and nothing here
+ * can tell the difference. Reporting it as a problem would be a guess dressed up as a finding.
+ */
+function reportAlwaysOnBlocks(root, slug, currentVersion) {
+  const blocks = readAlwaysOnBlocks(root);
+  if (blocks.length === 0) return;
+
+  console.log('');
+  console.log('bindry: always-on instructions (loaded on every turn, not only when a skill matches)');
+
+  for (const block of blocks) {
+    const label = `${block.file} — ${block.slug}${block.version ? ` (${block.version})` : ''}`;
+    if (slug && block.slug === slug) {
+      if (currentVersion && block.version && block.version !== currentVersion) {
+        console.log(`  ! ${label} — stale: the Binder now publishes ${currentVersion}`);
+      } else {
+        console.log(`  = ${label} — current`);
+      }
+    } else {
+      // Named, not judged: this is another Binder's block and this script cannot see its state.
+      console.log(`  · ${label} — from another Binder, not checked here`);
+    }
+  }
+}
+
+// Only run when executed directly, matching compile-binder.mjs — so the helpers above can be
+// imported and tested without a full drift check firing as a side effect.
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main();
+}
