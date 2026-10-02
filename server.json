@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "ai.bindry/bindry",
   "title": "Bindry",
-  "description": "Reuse your team's AI instructions (Skills and Binders) from Bindry in any MCP client.",
+  "description": "Reuse your team's AI instructions (skills and Binders) from Bindry in any MCP client.",
   "version": "0.2.2",
   "remotes": [
     {
