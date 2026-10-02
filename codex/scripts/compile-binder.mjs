@@ -487,6 +487,24 @@ async function main() {
   }
   console.log(`bindry: ${written.length} skill(s) written. Re-run any time the Binder changes to stay in sync.`);
 
+
+  // Copilot instructions files, when the server sent any. Like the always-on block these go relative
+  // to the repo root rather than into --out, because Copilot decides where they live
+  // (.github/instructions/), not us.
+  //
+  // Whole-file writes, unlike the always-on block: each one is a file Bindry owns end to end, with
+  // no hand-written content to preserve and no other Binder sharing it.
+  //
+  // Empty for Claude Code and Codex, which have no path matching — so this loop simply does not run
+  // on those targets rather than needing a per-platform branch.
+  for (const instruction of binder.instructions ?? []) {
+    if (!instruction.path || !instruction.content) continue;
+    const target = resolve(process.cwd(), instruction.path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, instruction.content, 'utf8');
+    console.log(`bindry: path-matched instructions written to ${target}`);
+  }
+
   // The always-on instructions go to the repo root, not into --out: CLAUDE.md is loaded by virtue
   // of where it sits, and --out points at the skills directory. cwd is the repo root in normal use,
   // and the path is printed either way so it is never a surprise where this landed.
