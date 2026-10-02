@@ -51,9 +51,38 @@ export function slugify(value) {
     .replace(/^-+|-+$/g, '');
 }
 
+// The description is loaded for EVERY skill in a Binder on every turn, so it is the one piece of
+// output with an unavoidable per-turn cost. The cap bounds what we ADD and never shortens the
+// title or the "Use when" clause, so a skill with no exclusions renders exactly what it rendered
+// before this existed.
+const MAX_DESCRIPTION_LENGTH = 500;
+
+const formatExclusions = (exclusions) => ` Not for: ${exclusions.join('; ')}.`;
+
+// Exclusions belong in the description, not only in the body: every host loads name and
+// description for all skills, then loads the body only once a skill has been chosen. A
+// "does not apply when" that lives solely in the body cannot prevent a wrong selection — it can
+// only persuade the model to back out after it has already paid to load the file.
+//
+// Exclusions are dropped as whole clauses, never cut mid-phrase: half a condition reads as a
+// different condition, and a rule that quietly means something else is worse than one that is absent.
 function describeSkill(skill) {
-  const trigger = skill.appliesWhen?.length ? skill.appliesWhen.join('; ') : skill.title;
-  return `${skill.title}. Use when: ${trigger}.`;
+  const trigger = skill.appliesWhen?.length
+    ? skill.appliesWhen.join('; ')
+    : skill.title;
+  const head = `${skill.title}. Use when: ${trigger}.`;
+
+  const exclusions = skill.doesNotApplyWhen ?? [];
+  if (exclusions.length === 0) return head;
+
+  // Author order is deliberate: the first one listed is the one they thought of first.
+  const kept = [];
+  for (const exclusion of exclusions) {
+    if (head.length + formatExclusions([...kept, exclusion]).length > MAX_DESCRIPTION_LENGTH) break;
+    kept.push(exclusion);
+  }
+
+  return kept.length === 0 ? head : head + formatExclusions(kept);
 }
 
 export function renderSkill(binder, skill, mode) {

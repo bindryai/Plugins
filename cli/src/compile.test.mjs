@@ -84,3 +84,64 @@ test('a current marker is not mistaken for a legacy one', () => {
   assert.ok(!hasLegacyComment(current));
   assert.ok(parsePinComment(current));
 });
+
+// --- BIND-0238: exclusions belong where the choice is made -------------------------------------
+
+const describedFrom = (contents) => contents.match(/^description: (.*)$/m)[1];
+
+test('exclusions reach the description, not only the body', () => {
+  // The whole point of the card. Every host loads name + description for all skills and loads the
+  // body only after one has been chosen, so an exclusion that lives solely in the body arrives
+  // too late to prevent a wrong pick.
+  const described = describedFrom(
+    renderSkill(binder, { ...skill, appliesWhen: ['naming a branch'], doesNotApplyWhen: ['tagging a release'] }, 'pinned')
+  );
+
+  assert.match(described, /Use when: naming a branch\./);
+  assert.match(described, /Not for: tagging a release\./);
+});
+
+test('a skill with no exclusions renders exactly what it always did', () => {
+  // The compatibility guarantee. Adding this feature must not change a single byte for the
+  // Binders already published, or every installed repo churns for no benefit.
+  const described = describedFrom(renderSkill(binder, { ...skill, appliesWhen: ['naming a branch'] }, 'pinned'));
+
+  assert.equal(described, 'Branch naming. Use when: naming a branch.');
+});
+
+test('the body still carries the exclusions too', () => {
+  // This adds a surface, it does not move one: once the skill IS loaded, the full list is still
+  // the more useful place to read the detail.
+  const contents = renderSkill(binder, { ...skill, doesNotApplyWhen: ['tagging a release'] }, 'pinned');
+
+  assert.match(contents, /Does not apply when:\n- tagging a release/);
+});
+
+test('exclusions are dropped whole, never cut mid-phrase', () => {
+  // Half a condition reads as a DIFFERENT condition. A rule that quietly means something else is
+  // worse than one that is simply absent, so the cap drops whole clauses from the end.
+  const long = 'x'.repeat(200);
+  const described = describedFrom(
+    renderSkill(binder, { ...skill, appliesWhen: ['naming a branch'], doesNotApplyWhen: [long, long, long] }, 'pinned')
+  );
+
+  assert.ok(described.length <= 500, `description was ${described.length} chars`);
+  // Assert the invariant, not an arithmetic count: at least one survives, at least one was
+  // dropped, and every survivor is whole. A hard-coded count would only test the fixture title.
+  const kept = described.split(long).length - 1;
+  assert.ok(kept >= 1 && kept <= 2, `kept ${kept}`);
+  assert.ok(described.endsWith('.'));
+});
+
+test('the cap never shortens the title or the "use when" clause', () => {
+  // The cap governs what we ADD. An author with a very long appliesWhen list had that output
+  // before this feature existed and must keep it — we are not entitled to trim their work because
+  // we decided to append to it.
+  const head = 'y'.repeat(600);
+  const described = describedFrom(
+    renderSkill(binder, { ...skill, appliesWhen: [head], doesNotApplyWhen: ['tagging a release'] }, 'pinned')
+  );
+
+  assert.ok(described.includes(head), 'the existing clause must survive in full');
+  assert.ok(!described.includes('Not for:'), 'nothing is added when there is no room for it');
+});
