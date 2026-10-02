@@ -25,7 +25,7 @@ Commands:
   search [query]        Search the public Library. --kind Binder|Skill --category <c> --tags <t,..> --json
   list                  List your own workspace's Binders. Requires login. --include-archived --json
   show <slug-or-id>      Show one Binder or Skill's detail (yours, or public). --json
-  pull <slug-or-id>      Pull a Binder into local files. --out <dir> --target skill-bundle|markdown|agents-md --mode pinned|live
+  pull <slug-or-id>      Pull a Binder into local files. --out <dir> --target skill-bundle|markdown|agents-md --mode pinned|live --binder-version <v>
   check                 Check locally pulled skills against their Binder's current versions. --dir <dir> --json
   import [path]         Import the instruction files already in a project (.claude/skills,
                         .cursor/rules, .windsurf/rules, .github/instructions) as private draft
@@ -116,8 +116,15 @@ async function main() {
       if (!rest[0]) throw new Error('usage: bindry show <slug-or-id> [--json]');
       return show({ ...session, id: rest[0], json: flags.json });
     case 'pull':
-      if (!rest[0]) throw new Error('usage: bindry pull <slug-or-id> [--out <dir>] [--target skill-bundle|markdown|agents-md] [--mode pinned|live]');
-      return pull({ ...session, id: rest[0], out: flags.out, target: flags.target, mode: flags.mode });
+      if (!rest[0]) throw new Error('usage: bindry pull <slug-or-id> [--out <dir>] [--target skill-bundle|markdown|agents-md] [--mode pinned|live] [--binder-version <v>]');
+      return pull({
+        ...session,
+        id: rest[0],
+        out: flags.out,
+        target: flags.target,
+        mode: flags.mode,
+        binderVersion: flags.binderVersion
+      });
     case 'check':
       return check({ ...session, dir: flags.dir, json: flags.json });
     case 'import':
