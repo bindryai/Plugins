@@ -138,6 +138,10 @@ export function binderDocumentFrom(binder) {
     slug: binder.slug ?? '',
     title: binder.title ?? '',
     summary: binder.summary ?? '',
+    // Always-on instructions. A repo owns these the same way it owns its skills: they are the
+    // Binder's voice, they belong in review beside the rules they colour, and a round trip that
+    // dropped them would quietly republish a Binder with its persona removed.
+    preamble: binder.preamble ?? '',
     category: binder.category ?? '',
     visibility: binder.visibility ?? 'Public',
     audience: binder.audience ?? [],
