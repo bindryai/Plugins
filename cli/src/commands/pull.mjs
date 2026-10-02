@@ -149,14 +149,16 @@ function writeAlwaysOnInstructions(binder, id) {
   const preamble = binder.preamble;
   if (!preamble || !preamble.path || !preamble.block) return;
 
-  // Keyed by what was typed to `bindry pull`, matching the pin comment, so that an update and an
-  // uninstall can find the same block later — see pinBinderRef above for why this is not binder.slug.
-  const slug = slugify(id);
+  // No key is passed: splicePreamble reads the slug out of the block it is writing.
+  //
+  // Passing one separately WAS the bug. This function sent slugify(id) — what the user typed on the
+  // command line — while the block itself carried the Binder's real slug. Pull by GUID and the two
+  // never matched, so the pattern found nothing and every pull appended another copy of the block.
   const target = resolve(process.cwd(), preamble.path);
   mkdirSync(dirname(target), { recursive: true });
 
   const before = existsSync(target) ? readFileSync(target, 'utf8') : '';
-  const after = splicePreamble(before, preamble.block, slug);
+  const after = splicePreamble(before, preamble.block);
 
   if (after === before) {
     console.log(`bindry: always-on instructions already current in ${target}.`);

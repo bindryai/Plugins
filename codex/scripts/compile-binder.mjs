@@ -495,7 +495,7 @@ async function main() {
     const target = resolve(process.cwd(), preamble.path);
     mkdirSync(dirname(target), { recursive: true });
     const before = existsSync(target) ? readFileSync(target, 'utf8') : '';
-    const after = splicePreamble(before, preamble.block, binder.slug);
+    const after = splicePreamble(before, preamble.block);
     if (after === before) {
       console.log(`bindry: always-on instructions already current in ${target}.`);
     } else {
@@ -558,6 +558,28 @@ function preambleBlockPattern(slug) {
 }
 
 /**
+ * The Binder slug a rendered block belongs to, read out of its own opening marker.
+ *
+ * This exists because the first version took the slug as an argument, and the two writers disagreed
+ * about what to pass: the plugin compiler passed the Binder's real slug, while `bindry pull` passed
+ * whatever the user typed on the command line. Pull a Binder by its GUID and the pattern searched
+ * for `binder=3f2504e0-…` inside a block that said `binder=git-flow`. It never matched, so every
+ * single pull appended another copy of the same block.
+ *
+ * Deriving it from the block removes the class of bug rather than that one instance: the string
+ * being written and the string being searched for are now the same string.
+ */
+function parsePreambleSlug(block) {
+  const match = /<!--\s*bindry:preamble\s+binder=([a-z0-9-]+)[\s>]/.exec(block ?? '');
+  if (!match) {
+    // Loudly, because a block we cannot identify is one we would append forever. Silence here is
+    // exactly what made the original bug invisible.
+    throw new Error('bindry: this always-on block has no readable "bindry:preamble binder=" marker, so it cannot be placed safely.');
+  }
+  return match[1];
+}
+
+/**
  * Splices one Binder's block into a file's existing contents.
  *
  * The destination is a file the user owns — CLAUDE.md and AGENTS.md are hand-written and long
@@ -568,9 +590,9 @@ function preambleBlockPattern(slug) {
  * Returns the contents unchanged when the block is already current, so a second compile is a no-op
  * and nothing appears in the user's diff.
  */
-function splicePreamble(existing, block, slug) {
+function splicePreamble(existing, block) {
   const current = existing ?? '';
-  const pattern = preambleBlockPattern(slug);
+  const pattern = preambleBlockPattern(parsePreambleSlug(block));
 
   if (pattern.test(current)) return current.replace(pattern, block);
 
