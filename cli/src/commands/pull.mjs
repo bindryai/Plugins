@@ -1,7 +1,7 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
 import { resolveBinderExport, resolveSkillExport, BindryApiError } from '../api.mjs';
-import { renderSkill, slugify } from '../compile.mjs';
+import { renderSkill, slugify, splicePreamble } from '../compile.mjs';
 
 const TARGET_ALIASES = {
   markdown: 'Markdown',
@@ -53,6 +53,7 @@ function writeBinderSkillBundle({ source, content, out, id, mode }) {
     `bindry: pulled "${binder.title ?? binder.slug}" (${source}, ${binder.skills.length} Skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`
   );
   for (const item of written) console.log(`  + ${item.title} -> ${item.path}`);
+  writeAlwaysOnInstructions(binder, id);
   console.log(`bindry: ${written.length} skill(s) written. Run "bindry check" any time to see if the Binder has moved on.`);
 }
 
@@ -131,4 +132,40 @@ export async function pull({ apiBase, token, id, out, target: targetFlag, mode }
   } else {
     writeSkillSkillBundle({ source, content: result.content, out, id, mode: resolvedMode });
   }
+}
+
+/**
+ * Writes the Binder's always-on instructions into the file the agent host loads on every turn.
+ *
+ * Goes to the repo root rather than into --out: CLAUDE.md is loaded by virtue of where it sits, and
+ * --out points at the skills directory. cwd is the repo root in normal use, and the resolved path is
+ * printed either way so it is never a surprise where this landed.
+ *
+ * Three rules, because the destination is a file the user owns and may have written entirely by
+ * hand: splice our block only, keep everything else byte for byte, and say nothing and change
+ * nothing when the block is already current.
+ */
+function writeAlwaysOnInstructions(binder, id) {
+  const preamble = binder.preamble;
+  if (!preamble || !preamble.path || !preamble.block) return;
+
+  // Keyed by what was typed to `bindry pull`, matching the pin comment, so that an update and an
+  // uninstall can find the same block later — see pinBinderRef above for why this is not binder.slug.
+  const slug = slugify(id);
+  const target = resolve(process.cwd(), preamble.path);
+  mkdirSync(dirname(target), { recursive: true });
+
+  const before = existsSync(target) ? readFileSync(target, 'utf8') : '';
+  const after = splicePreamble(before, preamble.block, slug);
+
+  if (after === before) {
+    console.log(`bindry: always-on instructions already current in ${target}.`);
+    return;
+  }
+
+  writeFileSync(target, after, 'utf8');
+  console.log(
+    `bindry: always-on instructions written to ${target}` +
+    `${before ? ' (your existing content was kept)' : ''}.`
+  );
 }

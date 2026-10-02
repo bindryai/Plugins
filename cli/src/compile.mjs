@@ -115,3 +115,72 @@ export function renderSkill(binder, skill, mode) {
   lines.push('');
   return lines.join('\n');
 }
+
+// --- The Binder's always-on instructions (BIND-0239/0240) --------------------------------------
+//
+// Skills are chosen per task; this is not. Tone, voice, output style and persona have no trigger —
+// "use when: writing anything" either never fires or always fires — so they cannot live in a skill
+// and still apply reliably. They go in the one file each host loads on every turn.
+//
+// Copilot reads BOTH .github/copilot-instructions.md and AGENTS.md, so it could take either. It
+// gets its own file deliberately: AGENTS.md is shared ground with Codex, and a repo with both
+// plugins installed would otherwise have one file carrying a block meant for the other, applying
+// the same persona twice to the same agent.
+const PREAMBLE_PATHS = {
+  'claude-code': 'CLAUDE.md',
+  codex: 'AGENTS.md',
+  copilot: '.github/copilot-instructions.md'
+};
+
+export function preamblePathFor(client) {
+  return PREAMBLE_PATHS[client] ?? PREAMBLE_PATHS['claude-code'];
+}
+
+// Matches one Binder's block and nothing else.
+//
+// The slug is validated rather than regex-escaped: a Binder slug is already normalised to
+// lowercase letters, digits and hyphens, so anything else is a caller bug and a silently
+// never-matching pattern would hide it — this throws instead.
+//
+// The `\s` after the slug is load-bearing. Without it `binder=acme` would also match
+// `binder=acme-voice`, and a compile would eat a different Binder's block. Non-greedy, so two
+// adjacent blocks are never swallowed as one.
+export function preambleBlockPattern(slug) {
+  if (!/^[a-z0-9-]+$/.test(String(slug ?? ''))) {
+    throw new Error(`bindry: "${slug}" is not a valid Binder slug, so its always-on block cannot be located safely.`);
+  }
+  return new RegExp(
+    `<!--\\s*bindry:preamble\\s+binder=${slug}\\s[\\s\\S]*?<!--\\s*/bindry:preamble\\s+binder=${slug}\\s*-->`
+  );
+}
+
+/**
+ * Splices one Binder's block into a file's existing contents.
+ *
+ * The destination is a file the user owns — CLAUDE.md and AGENTS.md are hand-written and long
+ * predate us — and more than one Binder may keep a block in it. So this replaces OUR block and
+ * touches nothing else: never a whole-file write, never a reformat, never a line-ending change to
+ * anything outside the markers.
+ *
+ * Returns the contents unchanged when the block is already current, so a second compile is a no-op
+ * and nothing appears in the user's diff.
+ */
+export function splicePreamble(existing, block, slug) {
+  const current = existing ?? '';
+  const pattern = preambleBlockPattern(slug);
+
+  if (pattern.test(current)) return current.replace(pattern, block);
+
+  const base = current.trimEnd();
+  return `${base ? `${base}\n\n` : ''}${block}\n`;
+}
+
+/** Removes one Binder's block, for an uninstall. Leaves no gap where it was. */
+export function removePreamble(existing, slug) {
+  const current = existing ?? '';
+  const pattern = preambleBlockPattern(slug);
+  if (!pattern.test(current)) return current;
+
+  const stripped = current.replace(pattern, '').replace(/\n{3,}/g, '\n\n').trimEnd();
+  return stripped ? `${stripped}\n` : '';
+}
