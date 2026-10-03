@@ -1,20 +1,20 @@
-import { listMyStacks } from '../api.mjs';
+import { listMyBinders } from '../api.mjs';
 import { printJson, printTable } from '../output.mjs';
 
-// Your workspace's own Stacks — requires `bindry login` first. For the public Library, use
+// Your workspace's own Binders — requires `bindry login` first. For the public Library, use
 // `bindry search` instead; this and that are deliberately separate commands, not one with a flag,
 // because "mine" and "everyone's" answer different questions and shouldn't be easy to mix up.
 export async function list({ apiBase, token, includeArchived, json }) {
   if (!token) {
-    throw new Error('not logged in. Run "bindry login <token>" first — this lists your own workspace\'s Stacks.');
+    throw new Error('not logged in. Run "bindry login <token>" first — this lists your own workspace\'s Binders.');
   }
 
-  const stacks = await listMyStacks(apiBase, token, { includeArchived });
+  const binders = await listMyBinders(apiBase, token, { includeArchived });
   if (json) {
-    printJson(stacks);
+    printJson(binders);
     return;
   }
-  printTable(stacks, [
+  printTable(binders, [
     { header: 'ID', value: (s) => s.id },
     { header: 'SLUG', value: (s) => s.slug },
     { header: 'TITLE', value: (s) => s.title },

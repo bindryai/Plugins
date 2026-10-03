@@ -10,7 +10,7 @@ import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { generatedScripts, scriptInSync } from './sync-compilers.mjs';
-import { publicExportUrl, resolvePinnedVersion } from '../claude-code/scripts/compile-stack.mjs';
+import { publicExportUrl, resolvePinnedVersion } from '../claude-code/scripts/compile-binder.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SKILL_PLATFORMS = ['codex', 'copilot'];
@@ -84,31 +84,31 @@ function checkSyntax(relPath) {
 }
 
 function checkCompiler(platform, exampleFile) {
-  const compilerPath = join(ROOT, platform, 'scripts', 'compile-stack.mjs');
+  const compilerPath = join(ROOT, platform, 'scripts', 'compile-binder.mjs');
   const examplePath = join(ROOT, platform, 'examples', exampleFile);
   if (!existsSync(compilerPath) || !existsSync(examplePath)) {
     fail(`${platform}: missing compiler or example fixture for ${exampleFile}`);
     return;
   }
 
-  const stack = JSON.parse(readFileSync(examplePath, 'utf8'));
+  const binder = JSON.parse(readFileSync(examplePath, 'utf8'));
   const outDir = mkdtempSync(join(tmpdir(), 'bindry-validate-'));
 
   try {
     execFileSync(process.execPath, [compilerPath, examplePath, '--out', outDir], { stdio: 'pipe' });
 
-    for (const binding of stack.bindings) {
-      const skillPath = join(outDir, binding.slug, 'SKILL.md');
+    for (const skill of binder.skills) {
+      const skillPath = join(outDir, skill.slug, 'SKILL.md');
       if (!existsSync(skillPath)) {
-        fail(`${platform}/${exampleFile}: compiling did not produce ${binding.slug}/SKILL.md`);
+        fail(`${platform}/${exampleFile}: compiling did not produce ${skill.slug}/SKILL.md`);
         continue;
       }
       const fields = parseFrontmatter(readFileSync(skillPath, 'utf8'));
       if (!fields?.name || !fields?.description) {
-        fail(`${platform}/${exampleFile}: compiled ${binding.slug}/SKILL.md is missing name/description frontmatter`);
+        fail(`${platform}/${exampleFile}: compiled ${skill.slug}/SKILL.md is missing name/description frontmatter`);
       }
     }
-    ok(`${platform}: compiled ${exampleFile} (${stack.bindings.length} binding(s)) into valid skills`);
+    ok(`${platform}: compiled ${exampleFile} (${binder.skills.length} skill(s)) into valid skills`);
   } catch (err) {
     fail(`${platform}: compiling ${exampleFile} failed (${err.stderr?.toString().trim() || err.message})`);
   } finally {
@@ -138,7 +138,7 @@ for (const platform of SKILL_PLATFORMS) {
 
 // --- Script syntax ---
 for (const platform of ALL_PLATFORMS) {
-  checkSyntax(`${platform}/scripts/compile-stack.mjs`);
+  checkSyntax(`${platform}/scripts/compile-binder.mjs`);
   checkSyntax(`${platform}/scripts/check-drift.mjs`);
 }
 
@@ -160,7 +160,7 @@ try {
 // --- Compiler regression smoke test, every platform, every bundled example ---
 for (const platform of ALL_PLATFORMS) {
   for (const exampleFile of readdirSync(join(ROOT, platform, 'examples'))) {
-    if (exampleFile.endsWith('.stack.json')) checkCompiler(platform, exampleFile);
+    if (exampleFile.endsWith('.binder.json')) checkCompiler(platform, exampleFile);
   }
 }
 

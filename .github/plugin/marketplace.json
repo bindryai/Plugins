@@ -11,7 +11,7 @@
     {
       "name": "bindry",
       "source": "./copilot",
-      "description": "Compile a bound Bindry Stack into GitHub Copilot skills, so instructions load only when they're relevant."
+      "description": "Compile a bound Bindry Binder into GitHub Copilot skills, so instructions load only when they're relevant."
     }
   ]
 }

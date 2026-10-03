@@ -1,10 +1,10 @@
 {
-  "stackId": "stk_git_flow_command_center",
+  "binderId": "stk_git_flow_command_center",
   "slug": "git-flow-command-center",
   "title": "Git Flow Command Center",
   "summary": "Branch, commit, review, merge, release — with prompts your agents can run without re-explaining your workflow.",
   "tokenEstimate": 580,
-  "bindings": [
+  "skills": [
     {
       "id": "bnd_git_branch_pr_hygiene",
       "slug": "git-branch-and-pr-hygiene",

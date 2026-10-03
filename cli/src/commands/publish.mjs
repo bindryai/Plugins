@@ -3,19 +3,19 @@ import { detectSourceRef } from '../source/gitref.mjs';
 import { publishFromSource } from '../api.mjs';
 
 /**
- * Pushes a repository's rules folder to a Stack (BIND-0197) — the CI half of letting a project keep its
+ * Pushes a repository's rules folder to a Binder (BIND-0197) — the CI half of letting a project keep its
  * rules in its own repo, reviewed in the same PR as the code they describe.
  *
  * Reconciliation is the server's job: this reads the folder, sends it whole, and reports what came back.
  * Deliberately so — deciding locally what changed would mean the CLI and the API each holding an opinion
- * about Binding identity, and the one that is wrong would be the one that quietly re-versions everything.
+ * about Skill identity, and the one that is wrong would be the one that quietly re-versions everything.
  */
-export async function publish({ apiBase, token, dir, publish: publishStack, stackVersion, changelog, repository, revision, takeOwnership, dryRun, json } = {}) {
+export async function publish({ apiBase, token, dir, publish: publishBinder, binderVersion, changelog, repository, revision, takeOwnership, dryRun, json } = {}) {
   const folder = readSourceFolder(dir ?? SOURCE_DIR);
 
-  if (folder.bindings.length === 0) {
+  if (folder.skills.length === 0) {
     throw new Error(
-      `no Binding documents in ${folder.root}/bindings. Refusing to publish an empty folder — that is far more ` +
+      `no Skill documents in ${folder.root}/skills. Refusing to publish an empty folder — that is far more ` +
       `often a wrong path or a failed checkout than a deliberate removal of every rule.`
     );
   }
@@ -33,16 +33,16 @@ export async function publish({ apiBase, token, dir, publish: publishStack, stac
     );
   }
 
-  if (publishStack && !stackVersion) {
-    throw new Error('--publish needs --stack-version <v>: the version to publish the Stack as.');
+  if (publishBinder && !binderVersion) {
+    throw new Error('--publish needs --binder-version <v>: the version to publish the Binder as.');
   }
 
   const payload = {
     sourceRef,
-    stack: folder.stack,
-    bindings: folder.bindings,
-    publish: Boolean(publishStack),
-    stackVersion: stackVersion ?? '',
+    binder: folder.binder,
+    skills: folder.skills,
+    publish: Boolean(publishBinder),
+    binderVersion: binderVersion ?? '',
     changelog: changelog ?? '',
     adoptExisting: Boolean(takeOwnership)
   };
@@ -73,46 +73,46 @@ function report({ json, folder, sourceRef, payload, result, dryRun }) {
 
   if (dryRun) {
     if (payload.adoptExisting) {
-      console.log('bindry: --take-ownership is set: an existing app-authored Stack or Binding with these slugs would become read-only in Bindry.');
+      console.log('bindry: --take-ownership is set: an existing app-authored Binder or Skill with these slugs would become read-only in Bindry.');
     }
-    console.log(`bindry: would publish ${payload.bindings.length} Binding document(s) from ${folder.root}`);
-    console.log(`bindry: to Stack "${payload.stack.slug}", recorded as coming from ${describe(sourceRef)}.`);
-    for (const document of payload.bindings) {
-      console.log(`  + ${document.binding.slug}  (${document.path})`);
+    console.log(`bindry: would publish ${payload.skills.length} Skill document(s) from ${folder.root}`);
+    console.log(`bindry: to Binder "${payload.binder.slug}", recorded as coming from ${describe(sourceRef)}.`);
+    for (const document of payload.skills) {
+      console.log(`  + ${document.skill.slug}  (${document.path})`);
     }
     console.log(payload.publish
-      ? `bindry: would publish the Stack as ${payload.stackVersion}. Nothing was sent.`
-      : 'bindry: would stage the Stack without publishing. Nothing was sent.');
+      ? `bindry: would publish the Binder as ${payload.binderVersion}. Nothing was sent.`
+      : 'bindry: would stage the Binder without publishing. Nothing was sent.');
     return payload;
   }
 
-  for (const outcome of result.bindings) {
+  for (const outcome of result.skills) {
     console.log(`  ${symbolFor(outcome.action)} ${outcome.slug}${outcome.version ? ` @ ${outcome.version}` : ''}` +
       `${outcome.message ? ` — ${outcome.message}` : ''}`);
   }
 
-  if (result.adoptedStack) {
+  if (result.adoptedBinder) {
     // Not reversible by re-running, so it gets its own line rather than a flag buried in the counts.
     console.log('');
-    console.log(`bindry: this repository has taken over authorship of "${result.stackSlug}". It is now read-only in Bindry.`);
+    console.log(`bindry: this repository has taken over authorship of "${result.binderSlug}". It is now read-only in Bindry.`);
   }
 
   for (const removal of result.removed) {
-    console.log(`  - ${removal.slug} — no longer in the folder. Dropped from the Stack; the Binding itself is untouched.`);
+    console.log(`  - ${removal.slug} — no longer in the folder. Dropped from the Binder; the Skill itself is untouched.`);
   }
 
-  const failed = result.bindings.filter((outcome) => outcome.action === 'failed');
-  const changed = result.bindings.filter((outcome) => outcome.action === 'created' || outcome.action === 'updated');
+  const failed = result.skills.filter((outcome) => outcome.action === 'failed');
+  const changed = result.skills.filter((outcome) => outcome.action === 'created' || outcome.action === 'updated');
 
   console.log('');
-  console.log(`bindry: ${describeCounts(result)} in Stack "${result.stackSlug}" from ${describe(sourceRef)}.`);
+  console.log(`bindry: ${describeCounts(result)} in Binder "${result.binderSlug}" from ${describe(sourceRef)}.`);
 
   if (result.publishedVersion) {
     console.log(`bindry: published as ${result.publishedVersion}.`);
   } else if (failed.length > 0) {
     console.log('bindry: not published — fix the failed document(s) above first. A rules set with a rule missing is worse than one that did not update.');
   } else {
-    console.log('bindry: staged, not published. Publish it in Bindry, or re-run with --publish --stack-version <v>.');
+    console.log('bindry: staged, not published. Publish it in Bindry, or re-run with --publish --binder-version <v>.');
   }
 
   if (failed.length > 0) {
@@ -127,7 +127,7 @@ function report({ json, folder, sourceRef, payload, result, dryRun }) {
 
 function describeCounts(result) {
   const parts = [];
-  const count = (action) => result.bindings.filter((outcome) => outcome.action === action).length;
+  const count = (action) => result.skills.filter((outcome) => outcome.action === action).length;
   for (const [action, label] of [['created', 'created'], ['updated', 'updated'], ['unchanged', 'unchanged'], ['failed', 'failed']]) {
     const total = count(action);
     if (total > 0) parts.push(`${total} ${label}`);

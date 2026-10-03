@@ -1,26 +1,26 @@
 // End-to-end tests against a tiny in-process HTTP server standing in for Bindry.API. There's no
 // access to a real running Bindry.API in this environment, so this is the closest thing to a real
 // round trip: real HTTP, real JSON parsing, real fetch — only the server on the other end is fake,
-// and it's shaped exactly like the real controllers (Bindry.API/Controllers/{Stacks,PublicCatalog}
+// and it's shaped exactly like the real controllers (Bindry.API/Controllers/{Binders,PublicCatalog}
 // Controller.cs) so a shape drift here would also break against the real API.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const TOKEN = 'test-token';
-const STACK_ID = '11111111-1111-1111-1111-111111111111';
-const BINDING_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const BINDING_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-// A Binding pulled entirely on its own (BIND-0190) — never part of a Stack. Published at version 2,
-// but the compiled content below is still the "1" snapshot, the same staleness setup the Stack test
-// uses for BINDING_A.
-const BINDING_C = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
-const STANDALONE_BINDING = {
-  id: BINDING_C,
+const BINDER_ID = '11111111-1111-1111-1111-111111111111';
+const SKILL_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const SKILL_B = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+// A Skill pulled entirely on its own (BIND-0190) — never part of a Binder. Published at version 2,
+// but the compiled content below is still the "1" snapshot, the same staleness setup the Binder test
+// uses for SKILL_A.
+const SKILL_C = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+const STANDALONE_SKILL = {
+  id: SKILL_C,
   slug: 'quick-review',
   title: 'Quick Review',
   version: '1',
@@ -31,9 +31,21 @@ const SKILL_BUNDLE = {
   slug: 'git-flow',
   title: 'Git Flow',
   tokenEstimate: 42,
-  bindings: [
-    { id: BINDING_A, slug: 'branch-naming', title: 'Branch naming', version: '3', instructions: 'Name branches feature/<ticket>.' },
-    { id: BINDING_B, slug: 'commit-style', title: 'Commit style', version: '1', instructions: 'Use conventional commits.' }
+  skills: [
+    { id: SKILL_A, slug: 'branch-naming', title: 'Branch naming', version: '3', instructions: 'Name branches feature/<ticket>.' },
+    { id: SKILL_B, slug: 'commit-style', title: 'Commit style', version: '1', instructions: 'Use conventional commits.' }
+  ]
+};
+
+// What version 1 of the Binder recorded: one skill, at the version it was pinned to then. The
+// current composition above has two skills and has moved branch-naming on — so pulling v1 and
+// pulling current must give visibly different files.
+const SKILL_BUNDLE_V1 = {
+  slug: 'git-flow',
+  title: 'Git Flow',
+  tokenEstimate: 20,
+  skills: [
+    { id: SKILL_A, slug: 'branch-naming', title: 'Branch naming', version: '1', instructions: 'Name branches by ticket.' }
   ]
 };
 
@@ -46,46 +58,66 @@ function startFakeApi() {
       res.end(JSON.stringify(body));
     };
 
-    if (url.pathname === '/api/stacks' && req.method === 'GET') {
+    if (url.pathname === '/api/binders' && req.method === 'GET') {
       if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
-      return json(200, [{ id: STACK_ID, slug: 'git-flow', title: 'Git Flow', status: 'Published', currentVersion: '2' }]);
+      return json(200, [{ id: BINDER_ID, slug: 'git-flow', title: 'Git Flow', status: 'Published', currentVersion: '2' }]);
     }
-    if (url.pathname === `/api/stacks/${STACK_ID}/export`) {
+    if (url.pathname === `/api/binders/${BINDER_ID}/export`) {
       if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
-      return json(200, { stackTitle: 'Git Flow', target: 'SkillBundle', fileName: 'git-flow.json', content: JSON.stringify(SKILL_BUNDLE) });
+      // Mirrors BindersController.Export's version handling (BIND-0252): a known version serves that
+      // version's compilation, an unknown one is a 400 naming the ones that exist, and omitting it
+      // serves the current composition with no version on the response.
+      const requested = url.searchParams.get('version');
+      if (requested) {
+        if (requested !== '1') {
+          return json(400, {
+            title: 'One or more validation errors occurred.',
+            errors: { Version: [`Version '${requested}' is not published for this Binder. Published versions: 1.`] }
+          });
+        }
+        return json(200, {
+          binderTitle: 'Git Flow',
+          target: url.searchParams.get('target'),
+          version: '1',
+          currentVersion: '2',
+          fileName: 'git-flow.json',
+          content: JSON.stringify(SKILL_BUNDLE_V1)
+        });
+      }
+      return json(200, { binderTitle: 'Git Flow', target: 'SkillBundle', fileName: 'git-flow.json', content: JSON.stringify(SKILL_BUNDLE) });
     }
-    if (url.pathname === `/api/stacks/${STACK_ID}`) {
+    if (url.pathname === `/api/binders/${BINDER_ID}`) {
       if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
       return json(200, {
-        stack: { id: STACK_ID, slug: 'git-flow', title: 'Git Flow', currentVersion: '2', summary: 'How we branch.' },
+        binder: { id: BINDER_ID, slug: 'git-flow', title: 'Git Flow', currentVersion: '2', summary: 'How we branch.' },
         // Current pinned version for branch-naming has moved to "4" server-side, ahead of the "3"
         // baked into SKILL_BUNDLE above — this is the drift `bindry check` should report as stale.
-        bindings: [
-          { bindingId: BINDING_A, bindingSlug: 'branch-naming', bindingTitle: 'Branch naming', pinnedVersion: '4' },
-          { bindingId: BINDING_B, bindingSlug: 'commit-style', bindingTitle: 'Commit style', pinnedVersion: '1' }
+        skills: [
+          { skillId: SKILL_A, skillSlug: 'branch-naming', skillTitle: 'Branch naming', pinnedVersion: '4' },
+          { skillId: SKILL_B, skillSlug: 'commit-style', skillTitle: 'Commit style', pinnedVersion: '1' }
         ]
       });
     }
-    if (url.pathname === '/api/public/catalog/stacks/git-flow') {
+    if (url.pathname === '/api/public/catalog/binders/git-flow') {
       return json(200, {
-        listing: { sourceId: STACK_ID, slug: 'git-flow', title: 'Git Flow', currentVersion: '2', summary: 'Public copy.' },
-        bindings: [
-          { bindingId: BINDING_A, bindingSlug: 'branch-naming', bindingTitle: 'Branch naming', pinnedVersion: '4' },
-          { bindingId: BINDING_B, bindingSlug: 'commit-style', bindingTitle: 'Commit style', pinnedVersion: '1' }
+        listing: { sourceId: BINDER_ID, slug: 'git-flow', title: 'Git Flow', currentVersion: '2', summary: 'Public copy.' },
+        skills: [
+          { skillId: SKILL_A, skillSlug: 'branch-naming', skillTitle: 'Branch naming', pinnedVersion: '4' },
+          { skillId: SKILL_B, skillSlug: 'commit-style', skillTitle: 'Commit style', pinnedVersion: '1' }
         ]
       });
     }
-    if (url.pathname === '/api/public/catalog/stacks/git-flow/export') {
-      return json(200, { stackTitle: 'Git Flow', target: url.searchParams.get('target'), fileName: 'git-flow.json', content: JSON.stringify(SKILL_BUNDLE) });
+    if (url.pathname === '/api/public/catalog/binders/git-flow/export') {
+      return json(200, { binderTitle: 'Git Flow', target: url.searchParams.get('target'), fileName: 'git-flow.json', content: JSON.stringify(SKILL_BUNDLE) });
     }
-    // The real endpoint resolves "by slug or id" (PublicCatalogController.GetBinding) — mirrored here
+    // The real endpoint resolves "by slug or id" (PublicCatalogController.GetSkill) — mirrored here
     // so a pin recorded by GUID (the common case for check, since pull.mjs records the identifier it
     // was actually given) resolves the same way a slug does.
-    if (url.pathname === '/api/public/catalog/bindings/quick-review' || url.pathname === `/api/public/catalog/bindings/${BINDING_C}`) {
-      return json(200, { listing: { sourceId: BINDING_C, slug: 'quick-review', title: 'Quick Review', currentVersion: '2', summary: 'Fast first-pass review.' } });
+    if (url.pathname === '/api/public/catalog/skills/quick-review' || url.pathname === `/api/public/catalog/skills/${SKILL_C}`) {
+      return json(200, { listing: { sourceId: SKILL_C, slug: 'quick-review', title: 'Quick Review', currentVersion: '2', summary: 'Fast first-pass review.' } });
     }
-    if (url.pathname === '/api/public/catalog/bindings/quick-review/export') {
-      return json(200, { bindingTitle: 'Quick Review', target: url.searchParams.get('target'), fileName: 'quick-review.json', content: JSON.stringify(STANDALONE_BINDING) });
+    if (url.pathname === '/api/public/catalog/skills/quick-review/export') {
+      return json(200, { skillTitle: 'Quick Review', target: url.searchParams.get('target'), fileName: 'quick-review.json', content: JSON.stringify(STANDALONE_SKILL) });
     }
     return json(404, { error: 'not found' });
   });
@@ -122,7 +154,7 @@ test('login succeeds with a valid token and fails with a bad one', async () => {
   });
 });
 
-test('list rejects with no token, and returns the workspace\'s Stacks with one', async () => {
+test('list rejects with no token, and returns the workspace\'s Binders with one', async () => {
   await withFakeApi(async (apiBase) => {
     const { list } = await import('./commands/list.mjs');
     await assert.rejects(() => list({ apiBase, token: null }), /not logged in/);
@@ -140,7 +172,7 @@ test('list rejects with no token, and returns the workspace\'s Stacks with one',
   });
 });
 
-test('show finds a Stack by slug in the public Library with no token', async () => {
+test('show finds a Binder by slug in the public Library with no token', async () => {
   await withFakeApi(async (apiBase) => {
     const { show } = await import('./commands/show.mjs');
     const logs = [];
@@ -156,25 +188,99 @@ test('show finds a Stack by slug in the public Library with no token', async () 
   });
 });
 
-test('pull writes one SKILL.md per Binding with a parseable pin comment', async () => {
+test('pull writes one SKILL.md per Skill with a parseable pin comment', async () => {
   await withFakeApi(async (apiBase) => {
     await withTempDir(async (outDir) => {
       const { pull } = await import('./commands/pull.mjs');
-      await pull({ apiBase, token: TOKEN, id: STACK_ID, out: outDir, target: 'skill-bundle', mode: 'pinned' });
+      await pull({ apiBase, token: TOKEN, id: BINDER_ID, out: outDir, target: 'skill-bundle', mode: 'pinned' });
 
       const skillPath = join(outDir, 'branch-naming', 'SKILL.md');
       assert.ok(existsSync(skillPath));
       const contents = readFileSync(skillPath, 'utf8');
       assert.ok(contents.includes('Name branches feature/<ticket>.'));
-      // The pin records STACK_ID (what was actually passed to `pull`), not the compiled content's
-      // "git-flow" slug — see pull.mjs's pinStackRef comment for why that distinction matters for
-      // a private-only Stack.
-      assert.match(contents, new RegExp(`bindry:pin stack=${STACK_ID} binding=${BINDING_A} version=3`));
+      // The pin records BINDER_ID (what was actually passed to `pull`), not the compiled content's
+      // "git-flow" slug — see pull.mjs's pinBinderRef comment for why that distinction matters for
+      // a private-only Binder.
+      assert.match(contents, new RegExp(`bindry:pin binder=${BINDER_ID} skill=${SKILL_A} version=3`));
     });
   });
 });
 
-test('pull falls back to a standalone Binding (BIND-0190) when no Stack matches, with no stack= in the pin', async () => {
+// --- Pulling a specific Binder version (BIND-0252) ---
+
+test('pull --binder-version installs that version, not the current composition', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (outDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      await pull({ apiBase, token: TOKEN, id: BINDER_ID, out: outDir, target: 'skill-bundle', binderVersion: '1' });
+
+      const pinned = join(outDir, 'branch-naming', 'SKILL.md');
+      assert.ok(existsSync(pinned));
+      const contents = readFileSync(pinned, 'utf8');
+      // v1's recorded content and version, not the current composition's.
+      assert.ok(contents.includes('Name branches by ticket.'));
+      assert.ok(!contents.includes('Name branches feature/<ticket>.'));
+      assert.match(contents, new RegExp(`skill=${SKILL_A} version=1 binder-version=1`));
+      // The second skill only exists in the current composition, so pinning to v1 must not write it.
+      assert.ok(!existsSync(join(outDir, 'commit-style', 'SKILL.md')));
+    });
+  });
+});
+
+test('pull without --binder-version records no binder-version, so existing pins keep their meaning', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (outDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      await pull({ apiBase, token: TOKEN, id: BINDER_ID, out: outDir, target: 'skill-bundle' });
+
+      const contents = readFileSync(join(outDir, 'branch-naming', 'SKILL.md'), 'utf8');
+      assert.ok(!contents.includes('binder-version='), 'an unpinned pull must not claim a Binder version');
+    });
+  });
+});
+
+test('pull --binder-version at a version that does not exist lists the ones that do', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (outDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      // The API answers 400 with a field error; the point is that the user sees the real versions
+      // rather than "request failed", and that nothing is written.
+      await assert.rejects(
+        () => pull({ apiBase, token: TOKEN, id: BINDER_ID, out: outDir, target: 'skill-bundle', binderVersion: '9.9.9' }),
+        /Published versions: 1/
+      );
+      assert.ok(!existsSync(join(outDir, 'branch-naming', 'SKILL.md')));
+    });
+  });
+});
+
+test('pull refuses --binder-version together with --mode live', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (outDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      await assert.rejects(
+        () => pull({ apiBase, token: TOKEN, id: BINDER_ID, out: outDir, mode: 'live', binderVersion: '1' }),
+        /cannot be combined with --mode live/
+      );
+    });
+  });
+});
+
+test('pull --binder-version does not silently fall back to a standalone Skill', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (outDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      // "quick-review" resolves as a Skill, which has no Binder versions — honouring the flag by
+      // ignoring it would hand back files that are not the version that was asked for.
+      await assert.rejects(
+        () => pull({ apiBase, token: null, id: 'quick-review', out: outDir, binderVersion: '1' }),
+        /--binder-version only applies to a Binder/
+      );
+    });
+  });
+});
+
+test('pull falls back to a standalone Skill (BIND-0190) when no Binder matches, with no binder= in the pin', async () => {
   await withFakeApi(async (apiBase) => {
     await withTempDir(async (outDir) => {
       const { pull } = await import('./commands/pull.mjs');
@@ -183,21 +289,21 @@ test('pull falls back to a standalone Binding (BIND-0190) when no Stack matches,
       const skillPath = join(outDir, 'quick-review', 'SKILL.md');
       assert.ok(existsSync(skillPath));
       const contents = readFileSync(skillPath, 'utf8');
-      assert.ok(contents.includes(STANDALONE_BINDING.instructions));
-      assert.match(contents, new RegExp(`bindry:pin binding=${BINDING_C} version=1`));
-      assert.ok(!contents.includes('stack='), 'a standalone pull must not fabricate a stack= field');
+      assert.ok(contents.includes(STANDALONE_SKILL.instructions));
+      assert.match(contents, new RegExp(`bindry:pin skill=${SKILL_C} version=1`));
+      assert.ok(!contents.includes('binder='), 'a standalone pull must not fabricate a binder= field');
     });
   });
 });
 
-test('check resolves a standalone Binding pin by its own id and reports drift, not "no longer part of this Stack"', async () => {
+test('check resolves a standalone Skill pin by its own id and reports drift, not "no longer part of this Binder"', async () => {
   await withFakeApi(async (apiBase) => {
     await withTempDir(async (bindryDir) => {
       const { pull } = await import('./commands/pull.mjs');
       const { check } = await import('./commands/check.mjs');
 
-      // Pulled at version 1 (STANDALONE_BINDING); the fake API's public detail route above reports
-      // this Binding's current version as 2.
+      // Pulled at version 1 (STANDALONE_SKILL); the fake API's public detail route above reports
+      // this Skill's current version as 2.
       await pull({ apiBase, token: null, id: 'quick-review', out: bindryDir, target: 'skill-bundle' });
 
       const rows = [];
@@ -210,22 +316,159 @@ test('check resolves a standalone Binding pin by its own id and reports drift, n
       }
       const parsed = JSON.parse(rows.join('\n'));
       const row = parsed.find((r) => r.skillDir === 'quick-review');
-      assert.equal(row.stack, null);
+      assert.equal(row.binder, null);
       assert.equal(row.status, 'stale');
       assert.equal(row.currentVersion, '2');
     });
   });
 });
 
-test('check reports a pulled Binding as stale once the server-side pin has moved on', async () => {
+// --- check respects a deliberate Binder-version pin (BIND-0257) ---
+//
+// Before this, check compared every pin against the Binder's CURRENT composition. Someone who pulled
+// v1 on purpose was told their skills were stale and then told to "run bindry pull again" — which
+// drops the --binder-version and moves them to current. The tool was telling them to abandon the
+// pin. The advice was the bug, not the label.
+
+test('check measures a version-pinned install against what that version locked, not current', async () => {
   await withFakeApi(async (apiBase) => {
     await withTempDir(async (bindryDir) => {
       const { pull } = await import('./commands/pull.mjs');
       const { check } = await import('./commands/check.mjs');
 
-      // Pulled at version 3 (baked into SKILL_BUNDLE); the fake API's /api/stacks/{id} above
-      // reports the Stack's current pin for the same Binding as version 4.
-      await pull({ apiBase, token: TOKEN, id: STACK_ID, out: join(bindryDir, 'git-flow'), target: 'skill-bundle' });
+      // v1 locks branch-naming at "1". The Binder's current composition has moved it to "4" and
+      // added a second skill — so comparing against current would call this stale.
+      await pull({
+        apiBase, token: TOKEN, id: BINDER_ID,
+        out: join(bindryDir, 'git-flow'), target: 'skill-bundle', binderVersion: '1'
+      });
+
+      const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir });
+
+      const row = parsed.find((r) => r.skillDir === 'branch-naming');
+      assert.equal(row.status, 'up to date');
+      assert.equal(row.binderVersion, '1');
+      // Carried on the row so a CI job sees it without parsing console text, and without the
+      // --json shape changing.
+      assert.equal(row.binderLatest, '2');
+      assert.notEqual(process.exitCode, 1);
+    });
+  });
+});
+
+test('check reports a newer Binder version as information, never as staleness', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      await pull({
+        apiBase, token: TOKEN, id: BINDER_ID,
+        out: join(bindryDir, 'git-flow'), target: 'skill-bundle', binderVersion: '1'
+      });
+
+      const logs = [];
+      const original = console.log;
+      console.log = (msg) => logs.push(String(msg));
+      try {
+        await check({ apiBase, token: TOKEN, dir: bindryDir });
+      } finally {
+        console.log = original;
+      }
+      const output = logs.join('\n');
+
+      assert.match(output, /pinned at v1; v2 has since been published/);
+      // The locking rule, said to the person it affects.
+      assert.match(output, /Nothing changes until you choose it/);
+      // And the two things that must NOT appear: the old verdict and the advice that undoes the pin.
+      assert.ok(!/are stale/.test(output), 'a deliberately pinned install is not stale');
+      assert.ok(!/Run "bindry pull git-flow" again/.test(output), 'must not advise dropping the pin');
+    });
+  });
+});
+
+test('check tells a genuinely altered pinned install to restore its own version, not current', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      await pull({
+        apiBase, token: TOKEN, id: BINDER_ID,
+        out: join(bindryDir, 'git-flow'), target: 'skill-bundle', binderVersion: '1'
+      });
+
+      // Simulate a local edit: the file now claims a skill version v1 never locked.
+      const skillPath = join(bindryDir, 'git-flow', 'branch-naming', 'SKILL.md');
+      writeFileSync(skillPath, readFileSync(skillPath, 'utf8').replace('version=1 ', 'version=7 '), 'utf8');
+
+      const logs = [];
+      const original = console.log;
+      console.log = (msg) => logs.push(String(msg));
+      try {
+        await check({ apiBase, token: TOKEN, dir: bindryDir });
+      } finally {
+        console.log = original;
+      }
+      const output = logs.join('\n');
+
+      // Stale is correct here — but the remedy must restore v1, not move to current.
+      assert.match(output, /do not match what they were pulled at/);
+      assert.match(output, /--binder-version 1/);
+      assert.equal(process.exitCode, 1);
+      process.exitCode = 0;
+    });
+  });
+});
+
+test('check on a pinned version that no longer exists says so, and does not advise re-pulling', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      await pull({
+        apiBase, token: TOKEN, id: BINDER_ID,
+        out: join(bindryDir, 'git-flow'), target: 'skill-bundle', binderVersion: '1'
+      });
+
+      // Rewrite the pin to a Binder version the API does not have — what a recall looks like from
+      // the consumer's side (BIND-0209).
+      const skillPath = join(bindryDir, 'git-flow', 'branch-naming', 'SKILL.md');
+      writeFileSync(skillPath, readFileSync(skillPath, 'utf8').replace('binder-version=1', 'binder-version=9.9.9'), 'utf8');
+
+      const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir });
+
+      const row = parsed.find((r) => r.skillDir === 'branch-naming');
+      assert.equal(row.status, 'unknown');
+      // The API's own words, so the real versions are visible rather than "request failed".
+      assert.match(row.note, /Published versions: 1/);
+      process.exitCode = 0;
+    });
+  });
+});
+
+async function runCheckJson(check, options) {
+  const logs = [];
+  const original = console.log;
+  console.log = (msg) => logs.push(String(msg));
+  try {
+    await check({ ...options, json: true });
+  } finally {
+    console.log = original;
+  }
+  return JSON.parse(logs.join('\n'));
+}
+
+test('check reports a pulled Skill as stale once the server-side pin has moved on', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      // Pulled at version 3 (baked into SKILL_BUNDLE); the fake API's /api/binders/{id} above
+      // reports the Binder's current pin for the same Skill as version 4.
+      await pull({ apiBase, token: TOKEN, id: BINDER_ID, out: join(bindryDir, 'git-flow'), target: 'skill-bundle' });
 
       const rows = [];
       const original = console.log;

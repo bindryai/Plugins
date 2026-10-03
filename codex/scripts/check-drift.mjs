@@ -1,25 +1,26 @@
 #!/usr/bin/env node
-// Reports which compiled skills are stale against their Stack's current pinned Binding
+// Reports which compiled skills are stale against their Binder's current pinned Skill
 // versions. Read-only — never re-syncs or writes anything.
 //
 // Usage:
 //   node check-drift.mjs [--dir <skills-dir>] [--api-base <url>] [--token <api-key>] [--version <v>]
 //
-// Reuses bindry.config.json (written by compile-stack.mjs) for the Stack id, API base and pinned
+// Reuses bindry.config.json (written by compile-binder.mjs) for the Binder id, API base and pinned
 // version unless overridden with flags, so running this right after a sync needs no arguments.
 //
 // This is Codex's copy of the same checker that ships with the Claude Code plugin
-// (../../claude-code/scripts/check-drift.mjs) — see compile-stack.mjs in this directory for why
+// (../../claude-code/scripts/check-drift.mjs) — see compile-binder.mjs in this directory for why
 // it's a self-contained copy rather than a shared import.
 //
 // Two questions, reported separately, because conflating them is how a pinned project reads as
 // permanently stale: (1) do the compiled skills match what this project is synced to, and (2) has the
-// Stack published a newer version than the one pinned. A pinned project that answers yes to (2) is not
+// Binder published a newer version than the one pinned. A pinned project that answers yes to (2) is not
 // broken — it is pinned, which is what was asked for.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { fail, readConfig, parsePinComment, parseLiveComment, GUID_PATTERN } from './compile-stack.mjs';
+import { fileURLToPath } from 'node:url';
+import { fail, readConfig, parsePinComment, parseLiveComment, GUID_PATTERN } from './compile-binder.mjs';
 
 function parseArgs(argv) {
   const args = { dir: '.agents/skills', apiBase: null, token: null, version: null };
@@ -63,26 +64,27 @@ async function readJson(response, url) {
 }
 
 /**
- * What the Stack says its Bindings should be pinned at, plus the version context around it:
- * { versionByBindingId, pinnedVersion, currentVersion, source }.
+ * What the Binder says its Skills should be pinned at, plus the version context around it:
+ * { versionBySkillId, pinnedVersion, currentVersion, source }.
  *
- * Resolved "yours first, then the Library", the same order compile-stack.mjs uses — a key scoped to
- * your own workspace must never stop you checking a Stack you installed from the Library. A pinned
- * project goes straight to the Library route: the workspace route only ever serves the Stack's current
+ * Resolved "yours first, then the Library", the same order compile-binder.mjs uses — a key scoped to
+ * your own workspace must never stop you checking a Binder you installed from the Library. A pinned
+ * project goes straight to the Library route: the workspace route only ever serves the Binder's current
  * composition, so asking it about a pinned version could only produce a confidently wrong answer.
  */
-async function fetchStackState(stackId, apiBase, token, version) {
+async function fetchBinderState(binderId, apiBase, token, version) {
   const base = apiBase.replace(/\/$/, '');
 
-  if (token && GUID_PATTERN.test(stackId) && !version) {
-    const url = `${base}/api/stacks/${stackId}`;
+  if (token && GUID_PATTERN.test(binderId) && !version) {
+    const url = `${base}/api/binders/${binderId}`;
     const response = await request(url, token);
     if (response.ok) {
       const detail = await readJson(response, url);
       return {
-        versionByBindingId: new Map((detail.bindings ?? []).map((b) => [b.bindingId, b.pinnedVersion])),
+        versionBySkillId: new Map((detail.skills ?? []).map((b) => [b.skillId, b.pinnedVersion])),
         pinnedVersion: null,
-        currentVersion: detail.stack?.currentVersion ?? '',
+        currentVersion: detail.binder?.currentVersion ?? '',
+        slug: detail.binder?.slug ?? '',
         source: 'your workspace'
       };
     }
@@ -93,7 +95,7 @@ async function fetchStackState(stackId, apiBase, token, version) {
   }
 
   const pin = version ? `&version=${encodeURIComponent(version)}` : '';
-  const url = `${base}/api/public/catalog/stacks/${encodeURIComponent(stackId)}/export?target=SkillBundle${pin}`;
+  const url = `${base}/api/public/catalog/binders/${encodeURIComponent(binderId)}/export?target=SkillBundle${pin}`;
   const response = await request(url, null);
 
   if (response.status === 400 && version) {
@@ -101,13 +103,13 @@ async function fetchStackState(stackId, apiBase, token, version) {
     fail(
       detail
         ? `${detail} (bindry.config.json pins version ${version})`
-        : `version ${version} of Stack "${stackId}" could not be read (${response.status} from ${url}).`
+        : `version ${version} of Binder "${binderId}" could not be read (${response.status} from ${url}).`
     );
   }
   if (response.status === 404) {
     fail(
-      `Stack "${stackId}" was not found at ${apiBase} — it may have been archived or unpublished. ` +
-      `If it is your own private Stack, pass --token <api-key> (or set BINDRY_API_TOKEN).`
+      `Binder "${binderId}" was not found at ${apiBase} — it may have been archived or unpublished. ` +
+      `If it is your own private Binder, pass --token <api-key> (or set BINDRY_API_TOKEN).`
     );
   }
   if (!response.ok) {
@@ -123,9 +125,10 @@ async function fetchStackState(stackId, apiBase, token, version) {
   }
 
   return {
-    versionByBindingId: new Map((bundle.bindings ?? []).map((b) => [b.id, b.version])),
+    versionBySkillId: new Map((bundle.skills ?? []).map((b) => [b.id, b.version])),
     pinnedVersion: envelope.version || null,
     currentVersion: envelope.currentVersion ?? '',
+    slug: bundle.slug ?? '',
     source: envelope.version ? `the Library, pinned to ${envelope.version}` : 'the Library'
   };
 }
@@ -145,12 +148,12 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const config = readConfig();
   const apiBase = args.apiBase ?? config?.apiBase;
-  const stackId = config?.stackId;
+  const binderId = config?.binderId;
   const requestedVersion = args.version?.trim();
   const version = requestedVersion === 'latest' ? null : (requestedVersion || config?.version || null);
 
-  if (!stackId) {
-    fail('no Stack id known — use the bindry-sync skill at least once first, so bindry.config.json remembers which Stack this project is synced to.');
+  if (!binderId) {
+    fail('no Binder id known — use the bindry-sync skill at least once first, so bindry.config.json remembers which Binder this project is synced to.');
   }
   if (!apiBase) {
     fail('--api-base is required (or use the bindry-sync skill at least once so bindry.config.json remembers it).');
@@ -163,8 +166,8 @@ async function main() {
     return;
   }
 
-  const state = await fetchStackState(stackId, apiBase, args.token, version);
-  const currentByBindingId = state.versionByBindingId;
+  const state = await fetchBinderState(binderId, apiBase, args.token, version);
+  const currentBySkillId = state.versionBySkillId;
 
   let staleCount = 0;
   let unknownCount = 0;
@@ -175,9 +178,9 @@ async function main() {
     const pin = parsePinComment(contents);
 
     if (pin) {
-      const expected = currentByBindingId.get(pin.binding);
+      const expected = currentBySkillId.get(pin.skill);
       if (expected === undefined) {
-        console.log(`  ? ${skillDir} — its Binding is no longer part of Stack ${pin.stack} (removed, or this project is synced to a different Stack now)`);
+        console.log(`  ? ${skillDir} — its Skill is no longer part of Binder ${pin.binder} (removed, or this project is synced to a different Binder now)`);
         unknownCount++;
       } else if (expected === pin.version) {
         console.log(`  = ${skillDir} — up to date (${pin.version})`);
@@ -185,7 +188,7 @@ async function main() {
         console.log(`  ! ${skillDir} — stale against pinned ${state.pinnedVersion}: compiled at ${pin.version}, that version pins ${expected}`);
         staleCount++;
       } else {
-        console.log(`  ! ${skillDir} — stale: compiled at ${pin.version}, Stack now pins ${expected}`);
+        console.log(`  ! ${skillDir} — stale: compiled at ${pin.version}, Binder now pins ${expected}`);
         staleCount++;
       }
       continue;
@@ -193,8 +196,8 @@ async function main() {
 
     const live = parseLiveComment(contents);
     if (live) {
-      if (!currentByBindingId.has(live.binding)) {
-        console.log(`  ? ${skillDir} — its Binding is no longer part of Stack ${live.stack} (removed, or this project is synced to a different Stack now)`);
+      if (!currentBySkillId.has(live.skill)) {
+        console.log(`  ? ${skillDir} — its Skill is no longer part of Binder ${live.binder} (removed, or this project is synced to a different Binder now)`);
         unknownCount++;
       } else {
         console.log(`  ~ ${skillDir} — live (always current, calls the MCP server directly)`);
@@ -221,16 +224,81 @@ async function main() {
   }
 
   // Being behind the newest published version is a separate fact from being stale, and it is not a
-  // problem: a pinned project is deliberately not following the Stack. Said once, at the end, so a
+  // problem: a pinned project is deliberately not following the Binder. Said once, at the end, so a
   // pinned project does not read as broken on every line.
   if (state.pinnedVersion && state.currentVersion && state.currentVersion !== state.pinnedVersion) {
     console.log(
-      `bindry: pinned to ${state.pinnedVersion}; the Stack has since published ${state.currentVersion}. ` +
+      `bindry: pinned to ${state.pinnedVersion}; the Binder has since published ${state.currentVersion}. ` +
       `Nothing is stale — use the bindry-sync skill with --version ${state.currentVersion} (or --version latest) when you want to move.`
     );
   } else if (state.pinnedVersion) {
     console.log(`bindry: pinned to ${state.pinnedVersion}, which is the newest published version.`);
   }
+
+  reportAlwaysOnBlocks(process.cwd(), state.slug, state.currentVersion);
 }
 
-main();
+
+// --- Always-on blocks (BIND-0243) --------------------------------------------------------------
+//
+// Skills live one-per-directory, so they never collide. The always-on block does: every Binder
+// installed into a repo keeps its block in the SAME file, and nothing anywhere tracks the full set.
+// That is what makes them worth reporting — a block acts on every single turn, and until now the
+// only way to know what was in there was to open the file and read it.
+//
+// All three candidate files are scanned rather than just this plugin's own. A repo with more than
+// one plugin installed genuinely has more than one, and showing only ours would under-report what
+// is actually acting on the agent.
+const ALWAYS_ON_FILES = ['CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md'];
+
+const PREAMBLE_MARKER = /<!--\s*bindry:preamble\s+binder=([a-z0-9-]+)(?:\s+version=(\S+))?\s*-->/g;
+
+export function readAlwaysOnBlocks(root) {
+  const found = [];
+  for (const relative of ALWAYS_ON_FILES) {
+    const path = join(root, relative);
+    if (!existsSync(path)) continue;
+
+    const contents = readFileSync(path, 'utf8');
+    for (const match of contents.matchAll(PREAMBLE_MARKER)) {
+      found.push({ file: relative, slug: match[1], version: match[2] ?? '' });
+    }
+  }
+  return found;
+}
+
+/**
+ * Reports the always-on blocks in this repo.
+ *
+ * Deliberately does NOT call another Binder's block orphaned. This script knows about exactly one
+ * Binder — the one in bindry.config.json — so a block belonging to a different slug may be a
+ * perfectly healthy second Binder or may be left over from one that was removed, and nothing here
+ * can tell the difference. Reporting it as a problem would be a guess dressed up as a finding.
+ */
+function reportAlwaysOnBlocks(root, slug, currentVersion) {
+  const blocks = readAlwaysOnBlocks(root);
+  if (blocks.length === 0) return;
+
+  console.log('');
+  console.log('bindry: always-on instructions (loaded on every turn, not only when a skill matches)');
+
+  for (const block of blocks) {
+    const label = `${block.file} — ${block.slug}${block.version ? ` (${block.version})` : ''}`;
+    if (slug && block.slug === slug) {
+      if (currentVersion && block.version && block.version !== currentVersion) {
+        console.log(`  ! ${label} — stale: the Binder now publishes ${currentVersion}`);
+      } else {
+        console.log(`  = ${label} — current`);
+      }
+    } else {
+      // Named, not judged: this is another Binder's block and this script cannot see its state.
+      console.log(`  · ${label} — from another Binder, not checked here`);
+    }
+  }
+}
+
+// Only run when executed directly, matching compile-binder.mjs — so the helpers above can be
+// imported and tested without a full drift check firing as a side effect.
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+  main();
+}

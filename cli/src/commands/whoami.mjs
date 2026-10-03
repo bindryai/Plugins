@@ -1,9 +1,9 @@
-import { listMyStacks, BindryApiError } from '../api.mjs';
+import { listMyBinders, BindryApiError } from '../api.mjs';
 import { readConfig } from '../config.mjs';
 
 // No dedicated identity endpoint accepts an API key today (see BIND-0175's scoping notes — plain
 // [Authorize] endpoints like /api/me/profile only accept a signed-in session, not X-Api-Key).
-// Listing Stacks is cheap, already needed elsewhere, and proves the token resolves to a real
+// Listing Binders is cheap, already needed elsewhere, and proves the token resolves to a real
 // workspace, so it doubles as the identity check.
 export async function whoami({ apiBase, token, json } = {}) {
   if (!token) {
@@ -19,7 +19,7 @@ export async function whoami({ apiBase, token, json } = {}) {
   const stored = readConfig();
 
   try {
-    const stacks = await listMyStacks(apiBase, token);
+    const binders = await listMyBinders(apiBase, token);
 
     if (json) {
       emit({
@@ -27,14 +27,14 @@ export async function whoami({ apiBase, token, json } = {}) {
         loggedIn: true,
         apiBase,
         tenantId: stored.tenantId ?? null,
-        stacks: stacks.length
+        binders: binders.length
       });
       return;
     }
 
     console.log(`bindry: logged in against ${apiBase}.`);
     if (stored.tenantId) console.log(`bindry: workspace ${stored.tenantId}.`);
-    console.log(`bindry: token is valid — ${stacks.length} Stack${stacks.length === 1 ? '' : 's'} visible in this workspace.`);
+    console.log(`bindry: token is valid — ${binders.length} Binder${binders.length === 1 ? '' : 's'} visible in this workspace.`);
   } catch (err) {
     if (err instanceof BindryApiError) {
       if (json) {
