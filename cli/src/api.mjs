@@ -198,9 +198,9 @@ export function getPublicSkill(apiBase, slugOrId) {
 // (text/markdown for Markdown/AgentsMd, application/json for SkillBundle), which only `.json()`
 // parses correctly for one of the three targets. The envelope always parses, and pull.mjs decides
 // what to do with .content based on the target it asked for.
-export function exportPublicBinder(apiBase, slugOrId, target) {
+export function exportPublicBinder(apiBase, slugOrId, target, version) {
   return requestJson(apiBase, `/api/public/catalog/binders/${encodeURIComponent(slugOrId)}/export`, {
-    searchParams: { target }
+    searchParams: { target, version }
   });
 }
 
@@ -229,10 +229,10 @@ export function getMyBinder(apiBase, token, binderId) {
   return requestJson(apiBase, `/api/binders/${encodeURIComponent(binderId)}`, { token });
 }
 
-export function exportMyBinder(apiBase, token, binderId, target) {
+export function exportMyBinder(apiBase, token, binderId, target, version) {
   return requestJson(apiBase, `/api/binders/${encodeURIComponent(binderId)}/export`, {
     token,
-    searchParams: { target }
+    searchParams: { target, version }
   });
 }
 
@@ -265,17 +265,24 @@ export async function resolveBinderDetail(apiBase, token, slugOrId) {
   return { source: 'public', detail: await getPublicBinder(apiBase, slugOrId) };
 }
 
-export async function resolveBinderExport(apiBase, token, slugOrId, target) {
+// `version` pins to a published Binder version (BIND-0252/BIND-0196). Both routes answer a version
+// that does not exist with a 400 naming the ones that do, which requestJson surfaces verbatim — so a
+// typo'd version reads as a list of real choices rather than "request failed".
+//
+// Note the 404 fallthrough below is about the Binder, not the version: a 400 from an unknown version
+// is rethrown rather than retried publicly, because retrying would turn "no such version of your
+// Binder" into "no such Binder", which sends the user looking for the wrong problem.
+export async function resolveBinderExport(apiBase, token, slugOrId, target, version) {
   if (token && GUID_PATTERN.test(slugOrId)) {
     try {
-      return { source: 'private', binder: await exportMyBinder(apiBase, token, slugOrId, target) };
+      return { source: 'private', binder: await exportMyBinder(apiBase, token, slugOrId, target, version) };
     } catch (err) {
       if (!(err instanceof BindryApiError) || (err.status !== 401 && err.status !== 403 && err.status !== 404)) {
         throw err;
       }
     }
   }
-  return { source: 'public', binder: await exportPublicBinder(apiBase, slugOrId, target) };
+  return { source: 'public', binder: await exportPublicBinder(apiBase, slugOrId, target, version) };
 }
 
 // Same "yours first, then public" resolution as resolveBinderExport, for a standalone Skill.
