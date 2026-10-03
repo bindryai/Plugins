@@ -11,12 +11,17 @@
 // no "binder=" field at all, rather than inventing a fake Binder identifier — "binder=<skill-id>"
 // would misdescribe what actually happened. `binder: null` in the parsed/rendered shape means
 // exactly that: this skill was compiled from a standalone Skill, not a Binder.
-const PIN_PATTERN = /<!--\s*bindry:pin\s+(?:binder=(\S+)\s+)?skill=(\S+)\s+version=(\S+)\s*-->/;
+// `binder-version=` is optional and comes last, so every pin written before BIND-0252 still parses.
+// It records which published Binder version produced this file — the skill's own `version=` says
+// what the file contains, which is not the same question once Binder versions can be installed.
+const PIN_PATTERN =
+  /<!--\s*bindry:pin\s+(?:binder=(\S+)\s+)?skill=(\S+)\s+version=(\S+?)(?:\s+binder-version=(\S+))?\s*-->/;
 const LIVE_PATTERN = /<!--\s*bindry:live\s+(?:binder=(\S+)\s+)?skill=(\S+)\s*-->/;
 
 export function renderPinComment(binder, skill) {
   const binderPart = binder ? `binder=${binder.slug} ` : '';
-  return `<!-- bindry:pin ${binderPart}skill=${skill.id} version=${skill.version} -->`;
+  const binderVersionPart = binder?.version ? ` binder-version=${binder.version}` : '';
+  return `<!-- bindry:pin ${binderPart}skill=${skill.id} version=${skill.version}${binderVersionPart} -->`;
 }
 
 export function renderLiveComment(binder, skill) {
@@ -26,7 +31,9 @@ export function renderLiveComment(binder, skill) {
 
 export function parsePinComment(contents) {
   const match = PIN_PATTERN.exec(contents);
-  return match ? { binder: match[1] ?? null, skill: match[2], version: match[3] } : null;
+  return match
+    ? { binder: match[1] ?? null, skill: match[2], version: match[3], binderVersion: match[4] ?? null }
+    : null;
 }
 
 // 0.1.x wrote `stack=`/`binding=` instead. A SKILL.md carrying those parses as neither a pin nor a

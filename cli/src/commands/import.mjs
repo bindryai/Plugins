@@ -119,7 +119,10 @@ function toRequest(draft, visibility) {
     examples: [],
     verificationChecklist: [],
     supportedTargets: SkillApiTargets,
-    tokenEstimate: estimateTokens(draft.instructions),
+    // Zeros on purpose: the server derives a skill's size from its content on every save and ignores
+    // what is sent here (BIND-0248). This used to send words * 1.4 with the whole figure booked as
+    // taskLoaded, a fifth definition of "size" that disagreed with the other four.
+    tokenEstimate: { estimated: 0, alwaysLoaded: 0, taskLoaded: 0 },
     trust: {
       reviewed: false,
       riskLevel: 'Low',
@@ -127,13 +130,6 @@ function toRequest(draft, visibility) {
       labels: ['Imported']
     }
   };
-}
-
-/** The same rough words-to-tokens factor the app uses when it has nothing better. */
-function estimateTokens(instructions) {
-  const words = instructions.trim().split(/\s+/).filter(Boolean).length;
-  const estimated = Math.round(words * 1.4);
-  return { estimated, alwaysLoaded: 0, taskLoaded: estimated };
 }
 
 function report({ json, root, results, dryRun, provenance, nothingFound }) {

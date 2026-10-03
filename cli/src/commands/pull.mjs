@@ -18,7 +18,7 @@ export function resolveTarget(value) {
   return target;
 }
 
-function writeBinderSkillBundle({ source, content, out, id, mode }) {
+function writeBinderSkillBundle({ source, content, out, id, mode, binderVersion }) {
   let binder;
   try {
     binder = JSON.parse(content);
@@ -35,7 +35,11 @@ function writeBinderSkillBundle({ source, content, out, id, mode }) {
   // it has no public listing at all, and `bindry check` re-resolves by re-running the exact same
   // lookup `pull` did; recording the content's slug there would send check down the public-only
   // path and 404 on a private Binder that was pulled by GUID.
-  const pinBinderRef = { slug: id };
+  // `version` is set only when a Binder version was pinned, and goes into the pin comment as
+  // `binder-version=`. The skill's own `version=` records what each file contains; this records
+  // which published Binder version those files came from, which is the question "am I deliberately
+  // behind, or just behind?" needs answering.
+  const pinBinderRef = { slug: id, version: binderVersion ?? null };
   const written = [];
   for (const skill of binder.skills) {
     if (!skill.slug || (mode === 'pinned' && !skill.instructions)) {
@@ -49,8 +53,9 @@ function writeBinderSkillBundle({ source, content, out, id, mode }) {
     written.push({ title: skill.title, path: skillPath });
   }
 
+  const at = binderVersion ? ` at v${binderVersion}` : '';
   console.log(
-    `bindry: pulled "${binder.title ?? binder.slug}" (${source}, ${binder.skills.length} Skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`
+    `bindry: pulled "${binder.title ?? binder.slug}"${at} (${source}, ${binder.skills.length} Skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`
   );
   for (const item of written) console.log(`  + ${item.title} -> ${item.path}`);
   writeAlwaysOnInstructions(binder, id);
@@ -91,21 +96,35 @@ function writeSkillSkillBundle({ source, content, out, id, mode }) {
 // standalone pull) — the same format and pin comment `bindry check` and the Claude Code/Codex
 // plugins already read. --target markdown/agents-md instead writes the single compiled file
 // Bindry's API already produces for that format.
-export async function pull({ apiBase, token, id, out, target: targetFlag, mode }) {
+export async function pull({ apiBase, token, id, out, target: targetFlag, mode, binderVersion }) {
   const target = resolveTarget(targetFlag);
   const resolvedMode = mode ?? 'pinned';
   if (resolvedMode !== 'pinned' && resolvedMode !== 'live') {
     throw new Error(`--mode must be "pinned" or "live", got "${resolvedMode}".`);
+  }
+  // Named --binder-version, not --version: the CLI's own -v/--version is intercepted before any
+  // command runs, so `pull x --version 1.0.0` would print the CLI version and exit. `publish` already
+  // spells it this way.
+  const requestedVersion = binderVersion?.trim() || undefined;
+  if (requestedVersion && resolvedMode === 'live') {
+    // A live compile resolves content through MCP at run time, which is the opposite of pinning:
+    // accepting both would hand back files that claim a version and then change underneath it.
+    throw new Error('--binder-version cannot be combined with --mode live: a live compile is not pinned to anything.');
   }
 
   let kind;
   let source;
   let result;
   try {
-    ({ source, binder: result } = await resolveBinderExport(apiBase, token, id, target));
+    ({ source, binder: result } = await resolveBinderExport(apiBase, token, id, target, requestedVersion));
     kind = 'Binder';
   } catch (err) {
     if (!(err instanceof BindryApiError) || err.status !== 404) throw err;
+    // Only a Binder has versions, so asking for one and then silently pulling a standalone Skill
+    // would quietly ignore the flag — say what happened instead.
+    if (requestedVersion) {
+      throw new Error(`no Binder "${id}" found, and --binder-version only applies to a Binder.`);
+    }
     try {
       ({ source, skill: result } = await resolveSkillExport(apiBase, token, id, target));
       kind = 'Skill';
@@ -123,12 +142,22 @@ export async function pull({ apiBase, token, id, out, target: targetFlag, mode }
     const filePath = join(outDir, result.fileName || `${slugify(id)}.md`);
     writeFileSync(filePath, result.content, 'utf8');
     const title = kind === 'Binder' ? result.binderTitle : result.skillTitle;
-    console.log(`bindry: pulled "${title ?? id}" (${source}) as ${target} -> ${filePath}`);
+    const at = result.version ? ` at v${result.version}` : '';
+    console.log(`bindry: pulled "${title ?? id}"${at} (${source}) as ${target} -> ${filePath}`);
     return;
   }
 
   if (kind === 'Binder') {
-    writeBinderSkillBundle({ source, content: result.content, out, id, mode: resolvedMode });
+    // result.version is the version the API actually served, in the version row's own casing — not
+    // the string that was typed, which may differ in case.
+    writeBinderSkillBundle({
+      source,
+      content: result.content,
+      out,
+      id,
+      mode: resolvedMode,
+      binderVersion: result.version || null
+    });
   } else {
     writeSkillSkillBundle({ source, content: result.content, out, id, mode: resolvedMode });
   }
