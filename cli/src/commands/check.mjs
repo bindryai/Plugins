@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { resolveBinderDetail, resolveSkillDetail } from '../api.mjs';
+import { resolveBinderDetail, resolveBinderExport, resolveSkillDetail } from '../api.mjs';
 import { parsePinComment, parseLiveComment, hasLegacyComment } from '../compile.mjs';
 import { printJson, printTable } from '../output.mjs';
 
@@ -17,6 +17,79 @@ function findCompiledSkills(dir) {
     if (existsSync(skillPath)) found.push({ skillDir: entry.name, skillPath });
   }
   return found;
+}
+
+/**
+ * Checks pins that were pulled at a specific Binder version against what THAT version locked
+ * (BIND-0257).
+ *
+ * Reads the versioned SkillBundle export rather than the Binder's current composition. That is a
+ * heavier read than it looks — it pulls content in order to compare version strings — and it is the
+ * only read available: the public listing exposes which versions exist (`publishedVersions`) but not
+ * what any of them contained, and `PublicCatalogVersion` carries no skill list. Decided to live with
+ * it rather than add a composition-at-version endpoint, because `check` is run occasionally and one
+ * extra read is cheaper than a new API surface to keep correct.
+ */
+async function checkPinnedToVersion({ apiBase, token, binderSlug, binderVersion, binderPins, rows, notices }) {
+  let exported;
+  try {
+    ({ binder: exported } = await resolveBinderExport(apiBase, token, binderSlug, 'SkillBundle', binderVersion));
+  } catch (err) {
+    // Covers both "that version is not published" (a 400 naming the ones that are) and a Binder
+    // version whose own pins can no longer be honoured (a 409 from BIND-0253). Either way the right
+    // answer is to surface the API's words, not to suggest re-pulling — re-pulling cannot conjure a
+    // version back, and suggesting it is what this card exists to stop.
+    for (const pin of binderPins) {
+      rows.push({ ...pin, status: 'unknown', currentVersion: null, note: err.message });
+    }
+    return;
+  }
+
+  let bundle;
+  try {
+    bundle = JSON.parse(exported.content);
+  } catch (err) {
+    for (const pin of binderPins) {
+      rows.push({ ...pin, status: 'unknown', currentVersion: null, note: `could not read the v${binderVersion} export (${err.message})` });
+    }
+    return;
+  }
+
+  const lockedBySkillId = new Map((bundle.skills ?? []).map((skill) => [skill.id, skill.version]));
+
+  // Information, not staleness. Reported once per Binder, in wording that does not imply anything is
+  // wrong, and deliberately with no instruction attached: taking the newer version is a decision the
+  // person makes, which is the whole point of the Binder being locked.
+  const latest = exported.currentVersion ?? null;
+  if (latest && latest !== binderVersion) {
+    notices.push({ binder: binderSlug, pinned: binderVersion, latest });
+  }
+
+  for (const pin of binderPins) {
+    if (pin.mode === 'live') {
+      const stillInVersion = lockedBySkillId.has(pin.skill);
+      rows.push({
+        ...pin,
+        status: stillInVersion ? 'live' : 'unknown',
+        currentVersion: null,
+        binderLatest: latest,
+        note: stillInVersion ? '' : `not part of v${binderVersion}`
+      });
+      continue;
+    }
+
+    const locked = lockedBySkillId.get(pin.skill);
+    if (locked === undefined) {
+      rows.push({ ...pin, status: 'unknown', currentVersion: null, binderLatest: latest, note: `not part of v${binderVersion}` });
+    } else if (locked === pin.version) {
+      // Holding exactly what was asked for. Silence is the correct output.
+      rows.push({ ...pin, status: 'up to date', currentVersion: locked, binderLatest: latest, note: '' });
+    } else {
+      // Genuinely wrong: the local file is not what this Binder version locked, so it was edited or
+      // the pull was partial. Re-pulling AT this version is the fix.
+      rows.push({ ...pin, status: 'stale', currentVersion: locked, binderLatest: latest, note: `v${binderVersion} locks ${locked}` });
+    }
+  }
 }
 
 export async function check({ apiBase, token, dir, json }) {
@@ -63,15 +136,31 @@ export async function check({ apiBase, token, dir, json }) {
   // group it under, and no shared lookup to share across pins the way a Binder's skills share one
   // resolveBinderDetail call. Each one is resolved on its own, by its own skill id.
   const standalonePins = pins.filter((pin) => pin.binder === null);
+
+  // Grouped by Binder AND the Binder version it was pulled at (BIND-0257), because that version is
+  // the thing a pin should be measured against. A pull that recorded `binder-version=1.0.0` is a
+  // statement of intent: the right question is "do I still have what 1.0.0 locked", not "does this
+  // match whatever the Binder contains now". Comparing against current told anyone deliberately
+  // holding an older version that they were stale, and then told them to re-pull — which would have
+  // abandoned the version they chose.
   const binderPinsByBinder = new Map();
   for (const pin of pins) {
     if (pin.binder === null) continue;
-    if (!binderPinsByBinder.has(pin.binder)) binderPinsByBinder.set(pin.binder, []);
-    binderPinsByBinder.get(pin.binder).push(pin);
+    const key = `${pin.binder}\u0000${pin.binderVersion ?? ''}`;
+    if (!binderPinsByBinder.has(key)) binderPinsByBinder.set(key, { binderSlug: pin.binder, binderVersion: pin.binderVersion ?? null, binderPins: [] });
+    binderPinsByBinder.get(key).binderPins.push(pin);
   }
 
   const rows = [];
-  for (const [binderSlug, binderPins] of binderPinsByBinder) {
+  // Binder-level facts rather than per-skill ones: a newer version existing is information, not a
+  // problem with any particular file, so it is reported separately and in different words.
+  const notices = [];
+
+  for (const { binderSlug, binderVersion, binderPins } of binderPinsByBinder.values()) {
+    if (binderVersion) {
+      await checkPinnedToVersion({ apiBase, token, binderSlug, binderVersion, binderPins, rows, notices });
+      continue;
+    }
     let detail;
     try {
       ({ detail } = await resolveBinderDetail(apiBase, token, binderSlug));
@@ -120,22 +209,47 @@ export async function check({ apiBase, token, dir, json }) {
   }
 
   if (json) {
+    // Still a flat array. Wrapping it as { skills, binderUpdates } would read better but it is a
+    // breaking change to a published CLI's machine contract, and it buys nothing: every row already
+    // carries binderVersion and binderLatest, so a CI job can see "a newer Binder version exists"
+    // without a shape change or parsing console text.
     printJson(rows);
     return;
   }
 
   printTable(rows, [
     { header: 'BINDER', value: (r) => r.binder ?? '(standalone Skill)' },
+    { header: 'AT', value: (r) => r.binderVersion ?? '-' },
     { header: 'SKILL', value: (r) => r.skillDir },
     { header: 'PINNED', value: (r) => r.version ?? '-' },
-    { header: 'CURRENT', value: (r) => r.currentVersion ?? '-' },
+    { header: 'EXPECTED', value: (r) => r.currentVersion ?? '-' },
     { header: 'STATUS', value: (r) => r.status },
     { header: 'NOTE', value: (r) => r.note }
   ]);
 
-  const stale = rows.filter((r) => r.status === 'stale').length;
-  if (stale > 0) {
-    console.log(`\n${stale} skill(s) are stale. Run "bindry pull <binder>" again to bring them up to date.`);
+  // Printed before the staleness summary so a clean, deliberately-pinned install does not end on a
+  // line that reads like a problem.
+  for (const notice of notices) {
+    console.log(
+      `\nbindry: "${notice.binder}" is pinned at v${notice.pinned}; v${notice.latest} has since been published. ` +
+      `Nothing changes until you choose it — pull again with --binder-version ${notice.latest} to take it.`
+    );
+  }
+
+  const staleRows = rows.filter((r) => r.status === 'stale');
+  if (staleRows.length > 0) {
+    // The advice has to match the pin, or it undoes it. Telling someone holding v1.0.0 to
+    // "pull again" moves them to current, which is the bug this card fixes.
+    const pinned = staleRows.filter((r) => r.binderVersion);
+    const unpinned = staleRows.filter((r) => !r.binderVersion);
+
+    console.log(`\n${staleRows.length} skill(s) do not match what they were pulled at.`);
+    for (const row of pinned) {
+      console.log(`  ${row.skillDir}: run "bindry pull ${row.binder} --binder-version ${row.binderVersion}" to restore v${row.binderVersion}.`);
+    }
+    if (unpinned.length > 0) {
+      console.log(`  Run "bindry pull <binder>" again to bring the unpinned ones up to date.`);
+    }
     process.exitCode = 1;
   }
 }
