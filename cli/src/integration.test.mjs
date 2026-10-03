@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -322,6 +322,143 @@ test('check resolves a standalone Skill pin by its own id and reports drift, not
     });
   });
 });
+
+// --- check respects a deliberate Binder-version pin (BIND-0257) ---
+//
+// Before this, check compared every pin against the Binder's CURRENT composition. Someone who pulled
+// v1 on purpose was told their skills were stale and then told to "run bindry pull again" — which
+// drops the --binder-version and moves them to current. The tool was telling them to abandon the
+// pin. The advice was the bug, not the label.
+
+test('check measures a version-pinned install against what that version locked, not current', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      // v1 locks branch-naming at "1". The Binder's current composition has moved it to "4" and
+      // added a second skill — so comparing against current would call this stale.
+      await pull({
+        apiBase, token: TOKEN, id: BINDER_ID,
+        out: join(bindryDir, 'git-flow'), target: 'skill-bundle', binderVersion: '1'
+      });
+
+      const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir });
+
+      const row = parsed.find((r) => r.skillDir === 'branch-naming');
+      assert.equal(row.status, 'up to date');
+      assert.equal(row.binderVersion, '1');
+      // Carried on the row so a CI job sees it without parsing console text, and without the
+      // --json shape changing.
+      assert.equal(row.binderLatest, '2');
+      assert.notEqual(process.exitCode, 1);
+    });
+  });
+});
+
+test('check reports a newer Binder version as information, never as staleness', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      await pull({
+        apiBase, token: TOKEN, id: BINDER_ID,
+        out: join(bindryDir, 'git-flow'), target: 'skill-bundle', binderVersion: '1'
+      });
+
+      const logs = [];
+      const original = console.log;
+      console.log = (msg) => logs.push(String(msg));
+      try {
+        await check({ apiBase, token: TOKEN, dir: bindryDir });
+      } finally {
+        console.log = original;
+      }
+      const output = logs.join('\n');
+
+      assert.match(output, /pinned at v1; v2 has since been published/);
+      // The locking rule, said to the person it affects.
+      assert.match(output, /Nothing changes until you choose it/);
+      // And the two things that must NOT appear: the old verdict and the advice that undoes the pin.
+      assert.ok(!/are stale/.test(output), 'a deliberately pinned install is not stale');
+      assert.ok(!/Run "bindry pull git-flow" again/.test(output), 'must not advise dropping the pin');
+    });
+  });
+});
+
+test('check tells a genuinely altered pinned install to restore its own version, not current', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      await pull({
+        apiBase, token: TOKEN, id: BINDER_ID,
+        out: join(bindryDir, 'git-flow'), target: 'skill-bundle', binderVersion: '1'
+      });
+
+      // Simulate a local edit: the file now claims a skill version v1 never locked.
+      const skillPath = join(bindryDir, 'git-flow', 'branch-naming', 'SKILL.md');
+      writeFileSync(skillPath, readFileSync(skillPath, 'utf8').replace('version=1 ', 'version=7 '), 'utf8');
+
+      const logs = [];
+      const original = console.log;
+      console.log = (msg) => logs.push(String(msg));
+      try {
+        await check({ apiBase, token: TOKEN, dir: bindryDir });
+      } finally {
+        console.log = original;
+      }
+      const output = logs.join('\n');
+
+      // Stale is correct here — but the remedy must restore v1, not move to current.
+      assert.match(output, /do not match what they were pulled at/);
+      assert.match(output, /--binder-version 1/);
+      assert.equal(process.exitCode, 1);
+      process.exitCode = 0;
+    });
+  });
+});
+
+test('check on a pinned version that no longer exists says so, and does not advise re-pulling', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const { check } = await import('./commands/check.mjs');
+
+      await pull({
+        apiBase, token: TOKEN, id: BINDER_ID,
+        out: join(bindryDir, 'git-flow'), target: 'skill-bundle', binderVersion: '1'
+      });
+
+      // Rewrite the pin to a Binder version the API does not have — what a recall looks like from
+      // the consumer's side (BIND-0209).
+      const skillPath = join(bindryDir, 'git-flow', 'branch-naming', 'SKILL.md');
+      writeFileSync(skillPath, readFileSync(skillPath, 'utf8').replace('binder-version=1', 'binder-version=9.9.9'), 'utf8');
+
+      const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir });
+
+      const row = parsed.find((r) => r.skillDir === 'branch-naming');
+      assert.equal(row.status, 'unknown');
+      // The API's own words, so the real versions are visible rather than "request failed".
+      assert.match(row.note, /Published versions: 1/);
+      process.exitCode = 0;
+    });
+  });
+});
+
+async function runCheckJson(check, options) {
+  const logs = [];
+  const original = console.log;
+  console.log = (msg) => logs.push(String(msg));
+  try {
+    await check({ ...options, json: true });
+  } finally {
+    console.log = original;
+  }
+  return JSON.parse(logs.join('\n'));
+}
 
 test('check reports a pulled Skill as stale once the server-side pin has moved on', async () => {
   await withFakeApi(async (apiBase) => {
