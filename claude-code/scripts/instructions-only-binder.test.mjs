@@ -95,6 +95,35 @@ for (const [name, compilerPath] of COMPILERS) {
     );
   });
 
+  test(`${name}: the always-on block still lands when there are no skills`, () => {
+    // The preamble is written after the skills loop, so "no skills" must not short-circuit it. An
+    // instructions-only Binder with a persona has to get both.
+    const dir = mkdtempSync(join(tmpdir(), 'bind-0262-pre-'));
+    try {
+      const bundle = join(dir, 'bundle.json');
+      writeFileSync(bundle, JSON.stringify({
+        ...INSTRUCTIONS_ONLY,
+        preamble: {
+          path: '.github/copilot-instructions.md',
+          block: '<!-- bindry:preamble binder=file-shaped-conventions version=1.0.0 -->\nWrite in British English.\n<!-- /bindry:preamble binder=file-shaped-conventions -->'
+        }
+      }), 'utf8');
+
+      const run = spawnSync(process.execPath, [compilerPath, bundle, '--out', '.github/skills'], {
+        cwd: dir,
+        encoding: 'utf8'
+      });
+
+      assert.equal(run.status, 0, `${name} refused it: ${run.stdout}${run.stderr}`);
+      assert.ok(existsSync(join(dir, INSTRUCTION_PATH)), `${name} wrote no instruction file`);
+      const preamblePath = join(dir, '.github/copilot-instructions.md');
+      assert.ok(existsSync(preamblePath), `${name} wrote no always-on block`);
+      assert.match(readFileSync(preamblePath, 'utf8'), /Write in British English\./, name);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test(`${name}: an export with neither skills nor instructions is still refused`, () => {
     // The guard was relaxed, not removed. Without this, deleting the guard outright would pass
     // every other test in this file.
