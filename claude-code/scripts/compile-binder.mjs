@@ -34,7 +34,15 @@ import { fileURLToPath } from 'node:url';
 
 export const CONFIG_FILE = 'bindry.config.json';
 export const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PIN_PATTERN = /<!--\s*bindry:pin\s+binder=(\S+)\s+skill=(\S+)\s+version=(\S+)\s*-->/;
+// `binder-version=` is optional and comes last, so every pin written before BIND-0252 still parses.
+//
+// It MUST be accepted here even though this script never writes it: `bindry pull --binder-version`
+// does, and this parser is what /bindry-check reads back. When the CLI added the field and these
+// three plugin copies were not updated, a folder of real compiled skills reported as "no bindry:pin
+// comment found, can't check (not compiled by /bindry-sync?)" — telling people their own Bindry
+// output was not Bindry's (BIND-0259). The format lives in four places; they have to agree.
+const PIN_PATTERN =
+  /<!--\s*bindry:pin\s+binder=(\S+)\s+skill=(\S+)\s+version=(\S+?)(?:\s+binder-version=(\S+))?\s*-->/;
 const LIVE_PATTERN = /<!--\s*bindry:live\s+binder=(\S+)\s+skill=(\S+)\s*-->/;
 
 // Shared with check-drift.mjs, which parses this same line back out of a compiled SKILL.md
@@ -45,7 +53,9 @@ export function renderPinComment(binder, skill) {
 
 export function parsePinComment(contents) {
   const match = PIN_PATTERN.exec(contents);
-  return match ? { binder: match[1], skill: match[2], version: match[3] } : null;
+  return match
+    ? { binder: match[1], skill: match[2], version: match[3], binderVersion: match[4] ?? null }
+    : null;
 }
 
 // A live-compiled skill has no version to pin — it always calls the MCP server for current
