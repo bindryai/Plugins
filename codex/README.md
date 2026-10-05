@@ -93,3 +93,34 @@ Claude Code plugin.
 - Codex skills have no structured "prefer tool X" mechanism beyond the prose in the skill body itself (confirmed
   against a real OpenAI-authored plugin already installed on this machine) — a live skill's instruction to call
   the MCP tool is exactly that: an instruction, not an enforced constraint.
+
+## Compiled skills need to be readable, and a failure here is nearly silent
+
+Codex reads each `SKILL.md` **twice**, and both reads have to succeed for a skill to do anything:
+
+1. **At session start**, Codex itself reads every `.agents/skills/**/SKILL.md` to build the list of skills the
+   model is offered — name, description, path.
+2. **During a turn**, the model reads the body of the skill it chose, with an ordinary shell command
+   (`Get-Content` / `cat`) against that path. There is no skill tool in Codex's event stream; the body arrives
+   this way or not at all.
+
+So a compiled skill is unavailable if **either** Codex cannot read the file at startup, **or** the agent's shell
+is sandboxed such that it cannot read the workspace during the turn. `codex exec -s read-only` is sufficient —
+read-only permits reads — but a stricter sandbox would not be.
+
+**The failure is almost invisible.** Observed directly (BIND-0264): with one `SKILL.md` made unreadable, Codex
+emitted a single line to **stderr** —
+
+```
+ERROR codex_core::session::session: failed to load skill …\bulletin-protocol\SKILL.md: failed to read file: Access is denied. (os error 5)
+```
+
+— and then ran the turn normally. The skill was simply absent: it was never offered, never mentioned, and the
+answer was written from general knowledge. Nothing in the response, and nothing on stdout, indicated that a
+skill had been expected and lost. If you redirect or ignore stderr, there is no signal at all.
+
+**The always-on block is unaffected.** In the same run the `AGENTS.md` preamble was still honoured in full, so
+a Binder can be half-working — persona applied, skills silently missing — which looks like the Binder working.
+
+If skills seem to be doing nothing on Codex, check stderr for that line before anything else. A malformed
+`SKILL.md` fails the same way, for the same reason, with `missing YAML frontmatter delimited by ---`.
