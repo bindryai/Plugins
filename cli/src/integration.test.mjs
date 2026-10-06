@@ -666,3 +666,172 @@ test('check reports a pulled Skill as stale once the server-side pin has moved o
     });
   });
 });
+
+// --- check reads Copilot's path-matched instruction files (BIND-0267) ---
+//
+// pull writes a path-shaped skill to .github/instructions/<slug>.instructions.md at the repo root
+// INSTEAD OF a SKILL.md. check scanned --dir for SKILL.md only, so those files were never looked at:
+// pull one, let the Binder move on, and nothing said so. The marker they carry records the SKILL, not
+// the Binder, so they are matched to Binders this run resolved from SKILL.md pins.
+
+const instructionFile = (skill, version) =>
+  `---\napplyTo: "**/*.ts"\n---\n\n<!-- bindry:instructions skill=${skill} version=${version} -->\n\nPrefer const over let.\n`;
+
+function writeInstructionFile(root, name, skill, version) {
+  const path = join(root, '.github', 'instructions', `${name}.instructions.md`);
+  mkdirSync(join(root, '.github', 'instructions'), { recursive: true });
+  writeFileSync(path, instructionFile(skill, version), 'utf8');
+}
+
+async function withPulledBinder(options, run) {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      await withTempDir(async (root) => {
+        const { pull } = await import('./commands/pull.mjs');
+        const { check } = await import('./commands/check.mjs');
+        await pull({
+          apiBase, token: TOKEN, id: BINDER_ID,
+          out: join(bindryDir, 'git-flow'), target: 'skill-bundle', ...options
+        });
+        try {
+          await run({ apiBase, bindryDir, root, check });
+        } finally {
+          process.exitCode = 0;
+        }
+      });
+    });
+  });
+}
+
+test('check reports an instruction file for a skill the Binder has moved on as stale', async () => {
+  await withPulledBinder({}, async ({ apiBase, bindryDir, root, check }) => {
+    // The fake API's current pin for SKILL_A is 4; this file was pulled at 3.
+    writeInstructionFile(root, 'branch-naming', SKILL_A, '3');
+
+    const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir, root });
+
+    const row = parsed.find((r) => r.kind === 'instructions');
+    assert.equal(row.file, '.github/instructions/branch-naming.instructions.md');
+    assert.equal(row.status, 'stale');
+    assert.equal(row.currentVersion, '4');
+    // The Binder is named as the pin named it: pulled by id, so the pin carries the id.
+    assert.equal(row.binder, BINDER_ID);
+    // --json never set an exit code for stale SKILL.md rows either; the machine reads the status.
+  });
+});
+
+test('check reports an instruction file at the Binder\'s current version as up to date', async () => {
+  await withPulledBinder({}, async ({ apiBase, bindryDir, root, check }) => {
+    writeInstructionFile(root, 'branch-naming', SKILL_A, '4');
+
+    const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir, root });
+
+    assert.equal(parsed.find((r) => r.kind === 'instructions').status, 'up to date');
+    assert.notEqual(process.exitCode, 1);
+  });
+});
+
+test('check measures an instruction file against the Binder version it was pulled at, not current', async () => {
+  // v1 of the Binder locks SKILL_A at 1; the Binder now pins it at 4. Holding 1 is exactly what a
+  // pinned install asked for. Comparing against current would tell them to abandon the pin (BIND-0257).
+  await withPulledBinder({ binderVersion: '1' }, async ({ apiBase, bindryDir, root, check }) => {
+    writeInstructionFile(root, 'branch-naming', SKILL_A, '1');
+
+    const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir, root });
+
+    const row = parsed.find((r) => r.kind === 'instructions');
+    assert.equal(row.status, 'up to date');
+    assert.equal(row.binderVersion, '1');
+    assert.notEqual(process.exitCode, 1);
+  });
+});
+
+test('check leaves an instruction file unchecked when no pulled Binder contains its skill', async () => {
+  await withPulledBinder({}, async ({ apiBase, bindryDir, root, check }) => {
+    writeInstructionFile(root, 'elsewhere', 'dddddddd-dddd-dddd-dddd-dddddddddddd', '1');
+
+    const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir, root });
+
+    const row = parsed.find((r) => r.kind === 'instructions');
+    assert.equal(row.status, 'unchecked');
+    assert.match(row.note, /not in any Binder pulled here/);
+    // Unchecked is not stale: nothing is known to be wrong, so nothing fails a CI job.
+    assert.notEqual(process.exitCode, 1);
+  });
+});
+
+test('check does not dismiss a repo of only instruction files as having no skills', async () => {
+  // A Binder made entirely of path-shaped skills pulls to no SKILL.md at all.
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (bindryDir) => {
+      await withTempDir(async (root) => {
+        const { check } = await import('./commands/check.mjs');
+        writeInstructionFile(root, 'typescript-conventions', SKILL_A, '3');
+
+        const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir, root });
+
+        assert.equal(parsed.length, 1);
+        assert.equal(parsed[0].kind, 'instructions');
+        assert.equal(parsed[0].status, 'unchecked');
+        assert.match(parsed[0].note, /no pulled Binder to compare it with/);
+      });
+    });
+  });
+});
+
+test('check ignores a hand-written instruction file with no Bindry marker', async () => {
+  await withPulledBinder({}, async ({ apiBase, bindryDir, root, check }) => {
+    mkdirSync(join(root, '.github', 'instructions'), { recursive: true });
+    writeFileSync(join(root, '.github', 'instructions', 'mine.instructions.md'), '---\napplyTo: "**"\n---\n\nUse tabs.\n', 'utf8');
+
+    const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir, root });
+
+    assert.equal(parsed.filter((r) => r.kind === 'instructions').length, 0);
+  });
+});
+
+test('check output for a repo with no instruction files is exactly what it was', async () => {
+  await withPulledBinder({}, async ({ apiBase, bindryDir, root, check }) => {
+    const parsed = await runCheckJson(check, { apiBase, token: TOKEN, dir: bindryDir, root });
+
+    assert.ok(parsed.length > 0);
+    assert.ok(parsed.every((r) => r.kind === undefined), 'SKILL.md rows must keep their existing shape');
+
+    const logs = [];
+    const original = console.log;
+    console.log = (msg) => logs.push(String(msg));
+    try {
+      await check({ apiBase, token: TOKEN, dir: bindryDir, root });
+    } finally {
+      console.log = original;
+    }
+    assert.doesNotMatch(logs.join('\n'), /Path-matched instruction files/);
+  });
+});
+
+test('check tells the reader a stale file for a skill that left path-matching is theirs to delete', async () => {
+  // Pulled at Binder v1 so every SKILL.md is exactly what v1 locked: the only thing that can fail the
+  // run here is the instruction file, which keeps the exit-code assertion below honest.
+  await withPulledBinder({ binderVersion: '1' }, async ({ apiBase, bindryDir, root, check }) => {
+    writeInstructionFile(root, 'branch-naming', SKILL_A, '0');
+
+    const logs = [];
+    const original = console.log;
+    console.log = (msg) => logs.push(String(msg));
+    try {
+      await check({ apiBase, token: TOKEN, dir: bindryDir, root });
+    } finally {
+      console.log = original;
+    }
+    const output = logs.join('\n');
+
+    assert.match(output, /Path-matched instruction files/);
+    assert.match(output, /1 instruction file\(s\) do not match what they were pulled at\./);
+    // Held to the version it was pulled at, and told to restore THAT version, not to move to current.
+    assert.ok(output.includes(`.github/instructions/branch-naming.instructions.md: run "bindry pull ${BINDER_ID} --binder-version 1" to refresh it.`));
+    // A pull writes files and never removes one, so re-pulling cannot clear a leftover.
+    assert.match(output, /no longer matched by path leaves its old file behind; delete that one\./);
+    // Stale means a CI job should notice, as it does for a stale SKILL.md.
+    assert.equal(process.exitCode, 1);
+  });
+});
