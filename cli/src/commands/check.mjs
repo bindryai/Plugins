@@ -19,9 +19,11 @@ import { printJson, printTable } from '../output.mjs';
 // needed to resolve drift are both present.
 //
 // The consequence, stated plainly: **a path-shaped skill's drift is currently invisible to
-// `bindry check`.** Pull it, let the Binder move on, and nothing reports it. Closing that means
-// teaching this command a second location and a second marker shape, which is a feature rather than
-// a tweak — so it is recorded here rather than done quietly as a side effect of BIND-0265.
+// `bindry check`.** Pull it, let the Binder move on, and nothing reports it. Recorded here rather
+// than done quietly as a side effect of BIND-0265, and carded as **BIND-0267** — which also covers
+// the three `check-drift.mjs` copies, since all four find their subjects the same way. Note the
+// plugin copies already read a fixed repo-root location (`ALWAYS_ON_FILES`), so the pattern this
+// needs already exists in the code.
 function findCompiledSkills(dir) {
   if (!existsSync(dir)) return [];
   const found = [];
