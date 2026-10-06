@@ -161,7 +161,10 @@ async function main() {
 
   const skillsDir = resolve(process.cwd(), args.dir);
   const skills = findCompiledSkills(skillsDir);
-  if (skills.length === 0) {
+  // A Binder made entirely of path-shaped skills compiles to no SKILL.md at all on Copilot (BIND-0262),
+  // so "no skills" is only "nothing to check" when there are no instruction files either (BIND-0267).
+  const instructionFiles = readInstructionFiles(process.cwd());
+  if (skills.length === 0 && instructionFiles.length === 0) {
     console.log(`bindry: no compiled skills found in ${skillsDir}. Use the bindry-sync skill first.`);
     return;
   }
@@ -212,7 +215,9 @@ async function main() {
 
   const upToDateCount = skills.length - staleCount - unknownCount - liveCount;
   console.log('');
-  if (staleCount === 0 && unknownCount === 0 && liveCount === 0) {
+  if (skills.length === 0) {
+    // Only instruction files were found; they have their own section below.
+  } else if (staleCount === 0 && unknownCount === 0 && liveCount === 0) {
     console.log(
       state.pinnedVersion
         ? `bindry: all ${skills.length} skill(s) match pinned version ${state.pinnedVersion}.`
@@ -235,7 +240,90 @@ async function main() {
     console.log(`bindry: pinned to ${state.pinnedVersion}, which is the newest published version.`);
   }
 
+  reportInstructionFiles(instructionFiles, currentBySkillId, state);
   reportAlwaysOnBlocks(process.cwd(), state.slug, state.currentVersion);
+}
+
+
+// --- Path-matched instruction files (BIND-0267) ------------------------------------------------
+//
+// On Copilot a skill with `appliesToPaths` compiles to `.github/instructions/<slug>.instructions.md`
+// at the repo root INSTEAD OF a SKILL.md (BIND-0245). The skill scan above looks for
+// `<dir>/<subdir>/SKILL.md`, so it never sees one: wrong location and wrong filename. Until this, a
+// path-shaped skill was the one compiled output that could fall behind forever without anything saying so.
+//
+// They are not missing a marker. They carry `<!-- bindry:instructions skill=<id> version=<v> -->`,
+// which is the same two facts a SKILL.md pin holds, and the SkillBundle export this script already reads
+// lists EVERY skill of the Binder with its pinned version whatever its shape. So the comparison is the
+// ordinary one; only the finding was missing.
+//
+// DECIDED: only files that EXIST are reported. A path-shaped skill whose file was deleted is not
+// flagged, for the same reason a deleted SKILL.md is not: the export carries no `appliesToPaths`, so
+// nothing here can say which files SHOULD exist. Guessing would report a skill that was never
+// path-shaped as missing.
+//
+// DECIDED: a skill that is no longer path-shaped leaves its old file behind (a sync writes files, it
+// does not remove them). Its version has moved on, so it reads as stale, and the advice says so rather
+// than suggesting a sync that cannot clear it. It is NOT detected by "a SKILL.md for this skill exists
+// too": on Claude Code every skill has a SKILL.md, path-shaped or not, and a repo with more than one
+// plugin legitimately holds both files for one skill.
+//
+// The marker carries no Binder slug, so a file whose skill is not in THIS Binder is named and not
+// judged, exactly as another Binder's always-on block is: it may be a healthy second Binder.
+const INSTRUCTIONS_DIR = '.github/instructions';
+const INSTRUCTIONS_MARKER = /<!--\s*bindry:instructions\s+skill=(\S+)\s+version=(\S+)\s*-->/;
+
+/** Every Bindry-written instruction file under .github/instructions, as { file, skill, version }. */
+export function readInstructionFiles(root) {
+  const dir = join(root, INSTRUCTIONS_DIR);
+  if (!existsSync(dir)) return [];
+
+  const found = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.instructions.md')) continue;
+    const match = INSTRUCTIONS_MARKER.exec(readFileSync(join(dir, entry.name), 'utf8'));
+    // No marker: written by hand, or by something else. Not ours to report on.
+    if (!match) continue;
+    found.push({ file: `${INSTRUCTIONS_DIR}/${entry.name}`, skill: match[1], version: match[2] });
+  }
+  return found.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+/** 'current', 'stale' (with what the Binder now pins), or 'elsewhere' when the skill is not in this Binder. */
+export function judgeInstructionFile(file, currentBySkillId) {
+  const expected = currentBySkillId.get(file.skill);
+  if (expected === undefined) return { status: 'elsewhere', expected: null };
+  return expected === file.version
+    ? { status: 'current', expected }
+    : { status: 'stale', expected };
+}
+
+function reportInstructionFiles(files, currentBySkillId, state) {
+  if (files.length === 0) return;
+
+  console.log('');
+  console.log('bindry: path-matched instruction files (applied by file path, not chosen by the agent)');
+
+  let staleCount = 0;
+  for (const file of files) {
+    const { status, expected } = judgeInstructionFile(file, currentBySkillId);
+    if (status === 'current') {
+      console.log(`  = ${file.file} — up to date (${file.version})`);
+    } else if (status === 'stale') {
+      staleCount++;
+      console.log(
+        state.pinnedVersion
+          ? `  ! ${file.file} — stale against pinned ${state.pinnedVersion}: compiled at ${file.version}, that version pins ${expected}`
+          : `  ! ${file.file} — stale: compiled at ${file.version}, Binder now pins ${expected}`
+      );
+    } else {
+      console.log(`  · ${file.file} — its skill is not in this Binder, so it is not checked here (another Binder's, or removed)`);
+    }
+  }
+
+  if (staleCount > 0) {
+    console.log('bindry: use the bindry-sync skill to update the stale instruction file(s). A skill that is no longer matched by path leaves its old file behind; delete that one.');
+  }
 }
 
 

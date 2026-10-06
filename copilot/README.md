@@ -36,7 +36,8 @@ with a leading slash in a prompt (`Use /bindry-sync to ...`) or trigger automati
 - **`/bindry-sync`** — compile a Bindry Binder into `.github/skills/` (Copilot's first project-local skills
   directory; it also reads `.agents/skills/` and `.claude/skills/`). Supports the same `--mode pinned|live`
   split as the other plugins. Run `/skills reload` or start a new session to pick up newly compiled skills.
-- **`/bindry-check`** — read-only drift report against the already-compiled skills. Never edits or re-syncs.
+- **`/bindry-check`** — read-only drift report against the already-compiled skills, and against the path-matched
+  `.github/instructions/` files a path-shaped skill compiles to, in their own section. Never edits or re-syncs.
 - **`/bindry-connect`** — one-time, per-machine setup connecting Copilot to the Bindry MCP server for live mode.
 
 Each skill finds the bundled scripts relative to its own base directory (`../../scripts/`), which Copilot
