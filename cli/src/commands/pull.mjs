@@ -25,8 +25,26 @@ function writeBinderSkillBundle({ source, content, out, id, mode, binderVersion 
   } catch (err) {
     throw new Error(`the SkillBundle export for "${id}" was not valid JSON (${err.message}).`);
   }
-  if (!binder.slug || !Array.isArray(binder.skills) || binder.skills.length === 0) {
-    throw new Error(`the resolved Binder "${id}" is missing "slug" or a non-empty "skills" array.`);
+  const skills = Array.isArray(binder.skills) ? binder.skills : [];
+  const instructions = Array.isArray(binder.instructions) ? binder.instructions : [];
+
+  // This CLI writes SKILL.md files and the always-on block. It does NOT write Copilot's path-matched
+  // .github/instructions files, so unlike the plugin compilers its guard is deliberately NOT relaxed
+  // to accept an instructions-only Binder (BIND-0262): accepting one here would write nothing at all
+  // and report success, which is worse than refusing. What it should not do is misdiagnose the case —
+  // the old message blamed the export for being "missing a non-empty skills array" when the export
+  // was fine and the gap is on this side.
+  if (!binder.slug) {
+    throw new Error(`the resolved Binder "${id}" is missing "slug".`);
+  }
+  if (skills.length === 0 && instructions.length > 0) {
+    throw new Error(
+      `the Binder "${id}" compiles only to Copilot path-matched instruction files, which this CLI ` +
+      `cannot write yet. Use the Copilot plugin's compile-binder.mjs for this Binder.`
+    );
+  }
+  if (skills.length === 0) {
+    throw new Error(`the resolved Binder "${id}" has no Skills and no instruction files to write.`);
   }
 
   const outDir = resolve(out ?? join('.', 'bindry', slugify(binder.slug)));
@@ -41,7 +59,7 @@ function writeBinderSkillBundle({ source, content, out, id, mode, binderVersion 
   // behind, or just behind?" needs answering.
   const pinBinderRef = { slug: id, version: binderVersion ?? null };
   const written = [];
-  for (const skill of binder.skills) {
+  for (const skill of skills) {
     if (!skill.slug || (mode === 'pinned' && !skill.instructions)) {
       console.warn(`bindry: skipping a Skill missing "slug" or "instructions" in ${binder.slug}.`);
       continue;
@@ -55,7 +73,7 @@ function writeBinderSkillBundle({ source, content, out, id, mode, binderVersion 
 
   const at = binderVersion ? ` at v${binderVersion}` : '';
   console.log(
-    `bindry: pulled "${binder.title ?? binder.slug}"${at} (${source}, ${binder.skills.length} Skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`
+    `bindry: pulled "${binder.title ?? binder.slug}"${at} (${source}, ${skills.length} Skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`
   );
   for (const item of written) console.log(`  + ${item.title} -> ${item.path}`);
   writeAlwaysOnInstructions(binder, id);

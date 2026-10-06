@@ -49,6 +49,25 @@ const SKILL_BUNDLE_V1 = {
   ]
 };
 
+// BIND-0262: a Copilot Binder whose every skill is path-shaped. On Copilot such a skill renders to
+// a .github/instructions file INSTEAD OF a SKILL.md, so the export carries an EMPTY skills array
+// and all of its content in instructions[]. The plugin compilers now accept this; THIS CLI does not
+// write path-matched instruction files at all, so it must refuse — but refuse by saying what is
+// actually wrong, rather than blaming the export for "missing a non-empty skills array".
+const INSTRUCTIONS_ONLY_BINDER_ID = '22222222-2222-2222-2222-222222222222';
+const INSTRUCTIONS_ONLY_BUNDLE = {
+  slug: 'file-shaped-conventions',
+  title: 'File-Shaped Conventions',
+  tokenEstimate: 90,
+  skills: [],
+  instructions: [
+    {
+      path: '.github/instructions/typescript-conventions.instructions.md',
+      content: '---\napplyTo: "**/*.ts"\n---\n\nPrefer const over let.\n'
+    }
+  ]
+};
+
 function startFakeApi() {
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -85,6 +104,15 @@ function startFakeApi() {
         });
       }
       return json(200, { binderTitle: 'Git Flow', target: 'SkillBundle', fileName: 'git-flow.json', content: JSON.stringify(SKILL_BUNDLE) });
+    }
+    if (url.pathname === `/api/binders/${INSTRUCTIONS_ONLY_BINDER_ID}/export`) {
+      if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
+      return json(200, {
+        binderTitle: 'File-Shaped Conventions',
+        target: 'SkillBundle',
+        fileName: 'file-shaped-conventions.json',
+        content: JSON.stringify(INSTRUCTIONS_ONLY_BUNDLE)
+      });
     }
     if (url.pathname === `/api/binders/${BINDER_ID}`) {
       if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
@@ -250,6 +278,33 @@ test('pull --binder-version at a version that does not exist lists the ones that
         /Published versions: 1/
       );
       assert.ok(!existsSync(join(outDir, 'branch-naming', 'SKILL.md')));
+    });
+  });
+});
+
+// BIND-0262. The plugin compilers were fixed to COMPILE this case; the CLI is deliberately not,
+// because it has no code that writes .github/instructions files — accepting the export here would
+// write nothing at all and report success, which is worse than refusing. What it must not do is
+// misdiagnose: the old message said the export was "missing a non-empty skills array", when the
+// export was correct and the gap is on this side.
+test('pull refuses an instructions-only Binder by naming the real reason, not blaming the export', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempDir(async (outDir) => {
+      const { pull } = await import('./commands/pull.mjs');
+      await assert.rejects(
+        () => pull({
+          apiBase, token: TOKEN, id: INSTRUCTIONS_ONLY_BINDER_ID,
+          out: outDir, target: 'skill-bundle', mode: 'pinned'
+        }),
+        (err) => {
+          assert.match(err.message, /path-matched instruction files/);
+          assert.match(err.message, /cannot write yet/);
+          // The specific regression: it must no longer tell the user their own valid export is
+          // missing something.
+          assert.doesNotMatch(err.message, /missing "slug" or a non-empty "skills" array/);
+          return true;
+        }
+      );
     });
   });
 });
