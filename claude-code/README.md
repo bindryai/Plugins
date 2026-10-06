@@ -81,6 +81,13 @@ On a version-pinned project it reports two things separately, because conflating
 look permanently broken: whether the compiled skills match the version you pinned, and whether the Binder has
 published a newer one since. The second is information, not staleness.
 
+It also reports Copilot's path-matched instruction files. A skill with `appliesToPaths` compiles to
+`.github/instructions/<slug>.instructions.md` at the repo root instead of a `SKILL.md`, so the scan above never sees
+one; `/bindry-check` reads the `bindry:instructions` marker those files carry and reports each in its own section, as
+up to date, stale, or "not in this Binder" (named, not judged: it may belong to a second Binder). A repo with none
+prints nothing extra. A file that was deleted is not reported, and a skill that stops being path-matched leaves its
+old file behind for you to delete: a sync writes files, it does not remove them.
+
 ## Live mode
 
 By default `/bindry-sync` compiles a **pinned** snapshot — a skill's instructions are copied in at compile

@@ -43,9 +43,12 @@ import { fileURLToPath } from 'node:url';
 export const CONFIG_FILE = 'bindry.config.json';
 export const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // `binder-version=` is optional and comes last, so every pin written before BIND-0252 still parses.
-// Accepted even though this script never writes it: `bindry pull --binder-version` does, and this
-// parser is what bindry-check reads back. See BIND-0259 — the format lives in four places and they
-// have to agree, or a folder of real compiled skills reports as not compiled by Bindry.
+//
+// It MUST be accepted here even though this script never writes it: `bindry pull --binder-version`
+// does, and this parser is what /bindry-check reads back. When the CLI added the field and these
+// three plugin copies were not updated, a folder of real compiled skills reported as "no bindry:pin
+// comment found, can't check (not compiled by /bindry-sync?)" — telling people their own Bindry
+// output was not Bindry's (BIND-0259). The format lives in four places; they have to agree.
 const PIN_PATTERN =
   /<!--\s*bindry:pin\s+binder=(\S+)\s+skill=(\S+)\s+version=(\S+?)(?:\s+binder-version=(\S+))?\s*-->/;
 const LIVE_PATTERN = /<!--\s*bindry:live\s+binder=(\S+)\s+skill=(\S+)\s*-->/;
@@ -461,14 +464,24 @@ async function main() {
 
   const { binder, synced } = await resolveBinder(args, mode, version);
 
-  if (!binder.slug || !Array.isArray(binder.skills) || binder.skills.length === 0) {
-    fail('the resolved Binder export is missing "slug" or a non-empty "skills" array — is this a Bindry Binder export?');
+  // On Copilot a path-shaped skill compiles to a .github/instructions file INSTEAD OF a SKILL.md, so
+  // a Binder of purely file-shaped conventions — TypeScript conventions, SQL conventions, migration
+  // rules — exports with an EMPTY skills array and all of its content in instructions[]. That is a
+  // valid export. Requiring a non-empty skills array rejected it and told the user their own Binder
+  // was not a Bindry export, which sent them looking for a corrupt download (BIND-0262).
+  //
+  // So the question is "did the server send anything to write", not "are there skills".
+  const skills = Array.isArray(binder.skills) ? binder.skills : [];
+  const instructions = Array.isArray(binder.instructions) ? binder.instructions : [];
+
+  if (!binder.slug || (skills.length === 0 && instructions.length === 0)) {
+    fail('the resolved Binder export is missing "slug", or has neither a non-empty "skills" array nor a non-empty "instructions" array — is this a Bindry Binder export?');
   }
 
   const outDir = resolve(process.cwd(), args.out);
   const written = [];
 
-  for (const skill of binder.skills) {
+  for (const skill of skills) {
     if (!skill.slug || !skill.instructions) {
       console.warn(`bindry: skipping a skill missing "slug" or "instructions" in ${binder.slug}`);
       continue;
@@ -488,12 +501,10 @@ async function main() {
     written.push({ title: skill.title, path: skillPath });
   }
 
-  console.log(`bindry: compiled "${binder.title ?? binder.slug}" (${binder.skills.length} skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`);
+  console.log(`bindry: compiled "${binder.title ?? binder.slug}" (${skills.length} skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`);
   for (const item of written) {
     console.log(`  + ${item.title} -> ${item.path}`);
   }
-  console.log(`bindry: ${written.length} skill(s) written. Re-run any time the Binder changes to stay in sync.`);
-
 
   // Copilot instructions files, when the server sent any. Like the always-on block these go relative
   // to the repo root rather than into --out, because Copilot decides where they live
@@ -504,13 +515,24 @@ async function main() {
   //
   // Empty for Claude Code and Codex, which have no path matching — so this loop simply does not run
   // on those targets rather than needing a per-platform branch.
-  for (const instruction of binder.instructions ?? []) {
+  //
+  // Written BEFORE the summary below, so the summary can count them: a Binder that compiled only
+  // instruction files used to report "0 skill(s) written", which reads as a failed compile.
+  let instructionsWritten = 0;
+  for (const instruction of instructions) {
     if (!instruction.path || !instruction.content) continue;
     const target = resolve(process.cwd(), instruction.path);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, instruction.content, 'utf8');
+    instructionsWritten += 1;
     console.log(`bindry: path-matched instructions written to ${target}`);
   }
+
+  const summary = [`${written.length} skill(s)`];
+  if (instructionsWritten > 0) {
+    summary.push(`${instructionsWritten} path-matched instruction file(s)`);
+  }
+  console.log(`bindry: ${summary.join(' and ')} written. Re-run any time the Binder changes to stay in sync.`);
 
   // The always-on instructions go to the repo root, not into --out: CLAUDE.md is loaded by virtue
   // of where it sits, and --out points at the skills directory. cwd is the repo root in normal use,

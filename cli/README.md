@@ -193,6 +193,11 @@ dropped it from the Binder while the Skill itself stayed alive and unarchived; `
 - No shell completion, no interactive prompts — every argument is explicit, on purpose, so it stays scriptable.
 - `check`'s drift comparison, like the plugins' own `/bindry-check`, can only report "pinned at X, Binder now
   pins Y," not how many versions behind that is — the API doesn't expose a Skill's full version history.
+- `check` also reads Copilot's path-matched `.github/instructions/*.instructions.md` files (rows marked
+  `kind: "instructions"` in `--json`), but can only measure one against a Binder it found another way: those files
+  record their skill, not the Binder they came from, so a Binder made *only* of path-shaped skills has nothing to
+  match against and its files are reported as `unchecked`. The plugins' `/bindry-check` does not have this limit,
+  because it knows its one Binder from `bindry.config.json`.
 
 ## Importing what you already have
 
