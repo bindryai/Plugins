@@ -8,6 +8,20 @@ import { printJson, printTable } from '../output.mjs';
 // Finds every SKILL.md under --dir, reads back the `bindry:pin`/`bindry:live` comment
 // bindry pull wrote, and reports each against the Binder's *current* pinned version from the API —
 // the local half of "version control" (BIND-0175's ask), pairing with pull's write half.
+//
+// DECIDED (BIND-0265): `check` does NOT look at Copilot's path-matched instruction files, and that
+// is a known gap rather than an oversight.
+//
+// `pull` writes those to `.github/instructions/<slug>.instructions.md` at the repo root, because
+// Copilot decides where they live. They are out of scope here twice over: wrong location (this scans
+// `--dir`) and wrong filename (this looks for `SKILL.md`). Note the reason is NOT "they carry no
+// marker" — they carry `<!-- bindry:instructions skill=<id> version=<v> -->`, so the id and version
+// needed to resolve drift are both present.
+//
+// The consequence, stated plainly: **a path-shaped skill's drift is currently invisible to
+// `bindry check`.** Pull it, let the Binder move on, and nothing reports it. Closing that means
+// teaching this command a second location and a second marker shape, which is a feature rather than
+// a tweak — so it is recorded here rather than done quietly as a side effect of BIND-0265.
 function findCompiledSkills(dir) {
   if (!existsSync(dir)) return [];
   const found = [];
