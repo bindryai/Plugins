@@ -7,9 +7,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 const TOKEN = 'test-token';
 const BINDER_ID = '11111111-1111-1111-1111-111111111111';
@@ -68,6 +68,46 @@ const INSTRUCTIONS_ONLY_BUNDLE = {
   ]
 };
 
+// BIND-0265. A Binder with BOTH kinds of output — the common real case, and the one that used to fail
+// silently: the SKILL.md landed and the path-scoped rule vanished with no warning.
+const MIXED_BINDER_ID = '33333333-3333-3333-3333-333333333333';
+const MIXED_BUNDLE = {
+  slug: 'mixed-conventions',
+  title: 'Mixed Conventions',
+  tokenEstimate: 120,
+  skills: [
+    { id: SKILL_A, slug: 'branch-naming', title: 'Branch naming', version: '3', instructions: 'Name branches feature/<ticket>.' }
+  ],
+  instructions: [
+    {
+      path: '.github/instructions/typescript-conventions.instructions.md',
+      content: '---\napplyTo: "**/*.ts"\n---\n\nPrefer const over let.\n'
+    }
+  ]
+};
+
+// An instruction path that climbs out of the directory `bindry pull` was run in. The server builds
+// these paths itself today, so this should be unreachable in practice — which is why it is worth a
+// test rather than trust.
+const ESCAPING_BINDER_ID = '44444444-4444-4444-4444-444444444444';
+const ESCAPING_BUNDLE = {
+  slug: 'escaping-conventions',
+  title: 'Escaping Conventions',
+  skills: [],
+  instructions: [
+    // Climbs exactly ONE level. The test runs from a subdirectory of its own temp dir, so if the
+    // guard ever regresses the stray file lands inside that temp dir and is cleaned up with it.
+    // An earlier version used "../../" and wrote into %LOCALAPPDATA% during a mutation run — which
+    // then made the test fail on its next real run, because the leftover was still there.
+    { path: '../escaped.instructions.md', content: 'should never be written\n' }
+  ]
+};
+
+// An export with nothing at all to write. Its own test is what stops the widened guard from
+// accepting an empty Binder as well as an instructions-only one.
+const EMPTY_BINDER_ID = '55555555-5555-5555-5555-555555555555';
+const EMPTY_BUNDLE = { slug: 'empty-binder', title: 'Empty Binder', skills: [], instructions: [] };
+
 function startFakeApi() {
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -112,6 +152,33 @@ function startFakeApi() {
         target: 'SkillBundle',
         fileName: 'file-shaped-conventions.json',
         content: JSON.stringify(INSTRUCTIONS_ONLY_BUNDLE)
+      });
+    }
+    if (url.pathname === `/api/binders/${MIXED_BINDER_ID}/export`) {
+      if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
+      return json(200, {
+        binderTitle: 'Mixed Conventions',
+        target: 'SkillBundle',
+        fileName: 'mixed-conventions.json',
+        content: JSON.stringify(MIXED_BUNDLE)
+      });
+    }
+    if (url.pathname === `/api/binders/${EMPTY_BINDER_ID}/export`) {
+      if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
+      return json(200, {
+        binderTitle: 'Empty Binder',
+        target: 'SkillBundle',
+        fileName: 'empty-binder.json',
+        content: JSON.stringify(EMPTY_BUNDLE)
+      });
+    }
+    if (url.pathname === `/api/binders/${ESCAPING_BINDER_ID}/export`) {
+      if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
+      return json(200, {
+        binderTitle: 'Escaping Conventions',
+        target: 'SkillBundle',
+        fileName: 'escaping-conventions.json',
+        content: JSON.stringify(ESCAPING_BUNDLE)
       });
     }
     if (url.pathname === `/api/binders/${BINDER_ID}`) {
@@ -165,6 +232,19 @@ async function withFakeApi(fn) {
 function withTempDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'bindry-cli-out-'));
   return Promise.resolve(fn(dir)).finally(() => rmSync(dir, { recursive: true, force: true }));
+}
+
+// Path-matched instruction files land relative to process.cwd(), not --out, because Copilot decides
+// where they live. So a test that pulls one has to OWN the working directory — otherwise it writes
+// .github/instructions/ into this package and leaves it there.
+function withTempCwd(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'bindry-cli-cwd-'));
+  const before = process.cwd();
+  process.chdir(dir);
+  return Promise.resolve(fn(dir)).finally(() => {
+    process.chdir(before);
+    rmSync(dir, { recursive: true, force: true });
+  });
 }
 
 test('login succeeds with a valid token and fails with a bad one', async () => {
@@ -282,29 +362,73 @@ test('pull --binder-version at a version that does not exist lists the ones that
   });
 });
 
-// BIND-0262. The plugin compilers were fixed to COMPILE this case; the CLI is deliberately not,
-// because it has no code that writes .github/instructions files — accepting the export here would
-// write nothing at all and report success, which is worse than refusing. What it must not do is
-// misdiagnose: the old message said the export was "missing a non-empty skills array", when the
-// export was correct and the gap is on this side.
-test('pull refuses an instructions-only Binder by naming the real reason, not blaming the export', async () => {
+// BIND-0265. The CLI now writes Copilot's path-matched instruction files. Before this, it had no
+// code for them at all: a mixed Binder's SKILL.md landed and its path-scoped rule vanished with no
+// warning, and the pull reported success. BIND-0262's interim refusal is gone with the gap it
+// described.
+test('pull writes the path-matched instruction files a Binder carries', async () => {
   await withFakeApi(async (apiBase) => {
-    await withTempDir(async (outDir) => {
+    await withTempCwd(async (cwd) => {
+      const { pull } = await import('./commands/pull.mjs');
+      await pull({
+        apiBase, token: TOKEN, id: INSTRUCTIONS_ONLY_BINDER_ID,
+        out: join(cwd, 'out'), target: 'skill-bundle', mode: 'pinned'
+      });
+
+      // Relative to the repo root, NOT to --out, because Copilot decides where these live.
+      const written = join(cwd, '.github', 'instructions', 'typescript-conventions.instructions.md');
+      assert.ok(existsSync(written), 'no instruction file was written');
+      assert.match(readFileSync(written, 'utf8'), /^---\napplyTo: "\*\*\/\*\.ts"\n---/);
+    });
+  });
+});
+
+test('pull writes BOTH kinds of output for a mixed Copilot Binder', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempCwd(async (cwd) => {
+      const { pull } = await import('./commands/pull.mjs');
+      const outDir = join(cwd, 'out');
+      await pull({ apiBase, token: TOKEN, id: MIXED_BINDER_ID, out: outDir, target: 'skill-bundle', mode: 'pinned' });
+
+      // This is the case that used to half-work, and the half that went missing is the second one.
+      assert.ok(existsSync(join(outDir, 'branch-naming', 'SKILL.md')), 'the SKILL.md is missing');
+      assert.ok(
+        existsSync(join(cwd, '.github', 'instructions', 'typescript-conventions.instructions.md')),
+        'the path-matched instruction file is missing — this is the BIND-0265 regression'
+      );
+    });
+  });
+});
+
+test('pull still refuses an export with neither Skills nor instruction files, and says what was missing', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempCwd(async (cwd) => {
+      const { pull } = await import('./commands/pull.mjs');
+      // Without this, widening the guard to accept instructions-only would also accept nothing at all.
+      await assert.rejects(
+        () => pull({ apiBase, token: TOKEN, id: EMPTY_BINDER_ID, out: join(cwd, 'out'), target: 'skill-bundle', mode: 'pinned' }),
+        /no Skills and no instruction files/
+      );
+    });
+  });
+});
+
+test('pull refuses an instruction path that climbs out of the working directory', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempCwd(async (root) => {
+      // Run from a subdirectory, so the path the Binder asks for ("../escaped.instructions.md")
+      // escapes into `root` — which this helper deletes — rather than into a real user directory.
+      const work = join(root, 'work');
+      mkdirSync(work, { recursive: true });
+      process.chdir(work);
+
       const { pull } = await import('./commands/pull.mjs');
       await assert.rejects(
-        () => pull({
-          apiBase, token: TOKEN, id: INSTRUCTIONS_ONLY_BINDER_ID,
-          out: outDir, target: 'skill-bundle', mode: 'pinned'
-        }),
-        (err) => {
-          assert.match(err.message, /path-matched instruction files/);
-          assert.match(err.message, /cannot write yet/);
-          // The specific regression: it must no longer tell the user their own valid export is
-          // missing something.
-          assert.doesNotMatch(err.message, /missing "slug" or a non-empty "skills" array/);
-          return true;
-        }
+        () => pull({ apiBase, token: TOKEN, id: ESCAPING_BINDER_ID, out: join(work, 'out'), target: 'skill-bundle', mode: 'pinned' }),
+        /outside this directory/
       );
+      // The refusal has to mean nothing was written, not that it was written and then complained about.
+      assert.ok(!existsSync(resolve(root, 'escaped.instructions.md')), 'the escaping file was written anyway');
     });
   });
 });

@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, sep } from 'node:path';
 import { resolveBinderExport, resolveSkillExport, BindryApiError } from '../api.mjs';
 import { renderSkill, slugify, splicePreamble } from '../compile.mjs';
 
@@ -28,22 +28,14 @@ function writeBinderSkillBundle({ source, content, out, id, mode, binderVersion 
   const skills = Array.isArray(binder.skills) ? binder.skills : [];
   const instructions = Array.isArray(binder.instructions) ? binder.instructions : [];
 
-  // This CLI writes SKILL.md files and the always-on block. It does NOT write Copilot's path-matched
-  // .github/instructions files, so unlike the plugin compilers its guard is deliberately NOT relaxed
-  // to accept an instructions-only Binder (BIND-0262): accepting one here would write nothing at all
-  // and report success, which is worse than refusing. What it should not do is misdiagnose the case —
-  // the old message blamed the export for being "missing a non-empty skills array" when the export
-  // was fine and the gap is on this side.
+  // On Copilot a path-shaped skill compiles to a .github/instructions file INSTEAD OF a SKILL.md, so
+  // a Binder of purely file-shaped conventions exports with an empty skills array and its content in
+  // instructions[]. The question is whether the server sent anything to write, not whether there are
+  // skills (BIND-0262 in the plugin compilers, BIND-0265 here).
   if (!binder.slug) {
     throw new Error(`the resolved Binder "${id}" is missing "slug".`);
   }
-  if (skills.length === 0 && instructions.length > 0) {
-    throw new Error(
-      `the Binder "${id}" compiles only to Copilot path-matched instruction files, which this CLI ` +
-      `cannot write yet. Use the Copilot plugin's compile-binder.mjs for this Binder.`
-    );
-  }
-  if (skills.length === 0) {
+  if (skills.length === 0 && instructions.length === 0) {
     throw new Error(`the resolved Binder "${id}" has no Skills and no instruction files to write.`);
   }
 
@@ -76,8 +68,15 @@ function writeBinderSkillBundle({ source, content, out, id, mode, binderVersion 
     `bindry: pulled "${binder.title ?? binder.slug}"${at} (${source}, ${skills.length} Skills, ~${binder.tokenEstimate ?? '?'} tokens) into ${outDir}`
   );
   for (const item of written) console.log(`  + ${item.title} -> ${item.path}`);
+
+  const instructionsWritten = writePathMatchedInstructions(instructions, id);
   writeAlwaysOnInstructions(binder, id);
-  console.log(`bindry: ${written.length} skill(s) written. Run "bindry check" any time to see if the Binder has moved on.`);
+
+  // Both counts, so a pull that produced only instruction files does not report "0 skill(s) written"
+  // and read as a failed pull.
+  const summary = [`${written.length} skill(s)`];
+  if (instructionsWritten > 0) summary.push(`${instructionsWritten} path-matched instruction file(s)`);
+  console.log(`bindry: ${summary.join(' and ')} written. Run "bindry check" any time to see if the Binder has moved on.`);
 }
 
 function writeSkillSkillBundle({ source, content, out, id, mode }) {
@@ -192,6 +191,45 @@ export async function pull({ apiBase, token, id, out, target: targetFlag, mode, 
  * hand: splice our block only, keep everything else byte for byte, and say nothing and change
  * nothing when the block is already current.
  */
+// Copilot's path-matched instruction files (BIND-0245), when the server sent any.
+//
+// These go relative to the repo ROOT, not into --out, because Copilot decides where they live
+// (.github/instructions/) and not us — the same reason the always-on block below ignores --out.
+// Whole-file writes, unlike the always-on block: each one is a file Bindry owns end to end, with no
+// hand-written content to preserve and no other Binder sharing it.
+//
+// Empty for Claude Code and Codex, which have no path matching, so this simply does not run on those
+// targets rather than needing a per-platform branch.
+function writePathMatchedInstructions(instructions, id) {
+  let count = 0;
+  const root = process.cwd();
+
+  for (const instruction of instructions) {
+    if (!instruction.path || !instruction.content) continue;
+
+    const target = resolve(root, instruction.path);
+
+    // The path comes from the server, and resolve() against cwd would happily follow "../.." out of
+    // the repository and overwrite something outside it. Today the server builds these paths itself
+    // (SkillFileRenderer: ".github/instructions/<slug>.instructions.md"), so this should never fire —
+    // which is exactly why it is cheap to check rather than to trust. Refusing loudly beats writing
+    // outside the directory the user ran `bindry pull` in.
+    if (target !== root && !target.startsWith(root + sep)) {
+      throw new Error(
+        `the Binder "${id}" asked to write an instruction file outside this directory ` +
+        `("${instruction.path}"). Refusing.`
+      );
+    }
+
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, instruction.content, 'utf8');
+    count += 1;
+    console.log(`bindry: path-matched instructions written to ${target}`);
+  }
+
+  return count;
+}
+
 function writeAlwaysOnInstructions(binder, id) {
   const preamble = binder.preamble;
   if (!preamble || !preamble.path || !preamble.block) return;
