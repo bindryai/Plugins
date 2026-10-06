@@ -9,21 +9,21 @@ import { printJson, printTable } from '../output.mjs';
 // bindry pull wrote, and reports each against the Binder's *current* pinned version from the API —
 // the local half of "version control" (BIND-0175's ask), pairing with pull's write half.
 //
-// DECIDED (BIND-0265): `check` does NOT look at Copilot's path-matched instruction files, and that
-// is a known gap rather than an oversight.
+// Copilot's path-matched instruction files (BIND-0267). `pull` writes a path-shaped skill to
+// `.github/instructions/<slug>.instructions.md` at the repo root INSTEAD OF a SKILL.md, because Copilot
+// decides where they live. The SKILL.md scan below never sees one: wrong location (this scans
+// `--dir`) and wrong filename. They carry `<!-- bindry:instructions skill=<id> version=<v> -->`, which
+// is the same two facts a pin holds, so they are read from the repo root and measured against the
+// Binders this run already resolved (readInstructionFiles / judgeInstructionRows below).
 //
-// `pull` writes those to `.github/instructions/<slug>.instructions.md` at the repo root, because
-// Copilot decides where they live. They are out of scope here twice over: wrong location (this scans
-// `--dir`) and wrong filename (this looks for `SKILL.md`). Note the reason is NOT "they carry no
-// marker" — they carry `<!-- bindry:instructions skill=<id> version=<v> -->`, so the id and version
-// needed to resolve drift are both present.
+// THE LIMIT, stated plainly: that marker records the SKILL, not the Binder it was pulled from. A pin
+// says `binder=<slug>`, so a SKILL.md is always measured against the right Binder. An instruction file
+// can only be matched to a Binder this run found by some OTHER route: a SKILL.md pin in `--dir`. A Binder
+// made ONLY of path-shaped skills therefore has nothing to match against, and its files are reported as
+// "unchecked", honestly, rather than guessed at. Closing that for good means the API writing the Binder
+// into the marker; it is not done here because it changes the file the API produces.
 //
-// The consequence, stated plainly: **a path-shaped skill's drift is currently invisible to
-// `bindry check`.** Pull it, let the Binder move on, and nothing reports it. Recorded here rather
-// than done quietly as a side effect of BIND-0265, and carded as **BIND-0267** — which also covers
-// the three `check-drift.mjs` copies, since all four find their subjects the same way. Note the
-// plugin copies already read a fixed repo-root location (`ALWAYS_ON_FILES`), so the pattern this
-// needs already exists in the code.
+// The plugin checkers do not have this limit: they know their one Binder from bindry.config.json.
 function findCompiledSkills(dir) {
   if (!existsSync(dir)) return [];
   const found = [];
@@ -46,7 +46,72 @@ function findCompiledSkills(dir) {
  * it rather than add a composition-at-version endpoint, because `check` is run occasionally and one
  * extra read is cheaper than a new API surface to keep correct.
  */
-async function checkPinnedToVersion({ apiBase, token, binderSlug, binderVersion, binderPins, rows, notices }) {
+const INSTRUCTIONS_DIR = '.github/instructions';
+const INSTRUCTIONS_MARKER = /<!--\s*bindry:instructions\s+skill=(\S+)\s+version=(\S+)\s*-->/;
+
+/** Every Bindry-written instruction file under <root>/.github/instructions, as { file, skill, version }. */
+export function readInstructionFiles(root) {
+  const dir = join(root, INSTRUCTIONS_DIR);
+  if (!existsSync(dir)) return [];
+
+  const found = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.instructions.md')) continue;
+    const match = INSTRUCTIONS_MARKER.exec(readFileSync(join(dir, entry.name), 'utf8'));
+    // No marker: written by hand, or by something else. Not ours to report on.
+    if (!match) continue;
+    found.push({ file: `${INSTRUCTIONS_DIR}/${entry.name}`, skill: match[1], version: match[2] });
+  }
+  return found.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+/**
+ * One row per instruction file, judged against the Binders this run resolved.
+ *
+ * `binderStates` is [{ binder, binderVersion, bySkillId }]: for an unpinned Binder its CURRENT
+ * composition, for one pulled at a version what THAT version locked (BIND-0257) — the same yardstick
+ * the SKILL.md rows use. A skill that appears in several Binders is current if it matches ANY of them,
+ * because the marker cannot say which one wrote the file.
+ *
+ * Rows carry `kind: 'instructions'` so a --json consumer can tell them from the SKILL.md rows, which
+ * keep their existing shape.
+ */
+export function judgeInstructionRows(files, binderStates) {
+  return files.map((file) => {
+    const base = { kind: 'instructions', file: file.file, skill: file.skill, version: file.version };
+    const matches = binderStates.filter((state) => state.bySkillId.has(file.skill));
+
+    if (matches.length === 0) {
+      return {
+        ...base,
+        binder: null,
+        binderVersion: null,
+        currentVersion: null,
+        status: 'unchecked',
+        note: binderStates.length === 0
+          ? 'no pulled Binder to compare it with (the file records its skill, not its Binder)'
+          : "its skill is not in any Binder pulled here (the file records its skill, not its Binder)"
+      };
+    }
+
+    const exact = matches.find((state) => state.bySkillId.get(file.skill) === file.version);
+    if (exact) {
+      return { ...base, binder: exact.binder, binderVersion: exact.binderVersion, currentVersion: file.version, status: 'up to date', note: '' };
+    }
+
+    const first = matches[0];
+    return {
+      ...base,
+      binder: first.binder,
+      binderVersion: first.binderVersion,
+      currentVersion: first.bySkillId.get(file.skill),
+      status: 'stale',
+      note: matches.length > 1 ? `also in ${matches.slice(1).map((state) => state.binder).join(', ')}` : ''
+    };
+  });
+}
+
+async function checkPinnedToVersion({ apiBase, token, binderSlug, binderVersion, binderPins, rows, notices, binderStates }) {
   let exported;
   try {
     ({ binder: exported } = await resolveBinderExport(apiBase, token, binderSlug, 'SkillBundle', binderVersion));
@@ -72,6 +137,8 @@ async function checkPinnedToVersion({ apiBase, token, binderSlug, binderVersion,
   }
 
   const lockedBySkillId = new Map((bundle.skills ?? []).map((skill) => [skill.id, skill.version]));
+  // What this Binder VERSION locked, which is what an instruction file pulled at that version is held to.
+  binderStates.push({ binder: binderSlug, binderVersion, bySkillId: lockedBySkillId });
 
   // Information, not staleness. Reported once per Binder, in wording that does not imply anything is
   // wrong, and deliberately with no instruction attached: taking the newer version is a decision the
@@ -108,7 +175,11 @@ async function checkPinnedToVersion({ apiBase, token, binderSlug, binderVersion,
   }
 }
 
-export async function check({ apiBase, token, dir, json }) {
+export async function check({ apiBase, token, dir, json, root }) {
+  // Where Copilot's instruction files live: the repo root, not --dir. cwd in normal use, as in pull.
+  const repoRoot = root ?? process.cwd();
+  const instructionFiles = readInstructionFiles(repoRoot);
+  const binderStates = [];
   const skillsDir = resolve(dir ?? join('.', 'bindry'));
   // A `bindry pull` writes one directory per Binder under --out (default ./bindry/<binder-slug>),
   // so this looks one level deeper than findCompiledSkills' own directory, unless --dir points
@@ -144,6 +215,17 @@ export async function check({ apiBase, token, dir, json }) {
       );
       return;
     }
+    if (instructionFiles.length > 0) {
+      // Only instruction files here (a Binder made entirely of path-shaped skills): nothing to compare
+      // them with, and saying so beats saying "no compiled skills".
+      const orphanRows = judgeInstructionRows(instructionFiles, binderStates);
+      if (json) {
+        printJson(orphanRows);
+      } else {
+        printInstructionRows(orphanRows);
+      }
+      return;
+    }
     console.log(`bindry: no compiled skills with a bindry:pin or bindry:live marker found under ${skillsDir}.`);
     return;
   }
@@ -174,7 +256,7 @@ export async function check({ apiBase, token, dir, json }) {
 
   for (const { binderSlug, binderVersion, binderPins } of binderPinsByBinder.values()) {
     if (binderVersion) {
-      await checkPinnedToVersion({ apiBase, token, binderSlug, binderVersion, binderPins, rows, notices });
+      await checkPinnedToVersion({ apiBase, token, binderSlug, binderVersion, binderPins, rows, notices, binderStates });
       continue;
     }
     let detail;
@@ -187,6 +269,7 @@ export async function check({ apiBase, token, dir, json }) {
       continue;
     }
     const currentBySkillId = new Map((detail.skills ?? []).map((b) => [b.skillId, b.pinnedVersion]));
+    binderStates.push({ binder: binderSlug, binderVersion: null, bySkillId: currentBySkillId });
     for (const pin of binderPins) {
       if (pin.mode === 'live') {
         const stillInBinder = currentBySkillId.has(pin.skill);
@@ -224,12 +307,16 @@ export async function check({ apiBase, token, dir, json }) {
     }
   }
 
+  const instructionRows = judgeInstructionRows(instructionFiles, binderStates);
+
   if (json) {
     // Still a flat array. Wrapping it as { skills, binderUpdates } would read better but it is a
     // breaking change to a published CLI's machine contract, and it buys nothing: every row already
     // carries binderVersion and binderLatest, so a CI job can see "a newer Binder version exists"
     // without a shape change or parsing console text.
-    printJson(rows);
+    // Instruction rows are appended, marked kind: 'instructions'. SKILL.md rows are unchanged, and a repo
+    // with no instruction files gets exactly the output it had before.
+    printJson([...rows, ...instructionRows]);
     return;
   }
 
@@ -252,6 +339,8 @@ export async function check({ apiBase, token, dir, json }) {
     );
   }
 
+  printInstructionRows(instructionRows);
+
   const staleRows = rows.filter((r) => r.status === 'stale');
   if (staleRows.length > 0) {
     // The advice has to match the pin, or it undoes it. Telling someone holding v1.0.0 to
@@ -268,4 +357,32 @@ export async function check({ apiBase, token, dir, json }) {
     }
     process.exitCode = 1;
   }
+
+  const staleInstructions = instructionRows.filter((r) => r.status === 'stale');
+  if (staleInstructions.length > 0) {
+    console.log(`\n${staleInstructions.length} instruction file(s) do not match what they were pulled at.`);
+    for (const row of staleInstructions) {
+      const pin = row.binderVersion ? ` --binder-version ${row.binderVersion}` : '';
+      console.log(`  ${row.file}: run "bindry pull ${row.binder}${pin}" to refresh it.`);
+    }
+    // A pull writes files; it does not remove one. A skill that is no longer matched by path leaves its
+    // old file behind, and re-pulling cannot clear it, so say so rather than send them round in a circle.
+    console.log('  A skill that is no longer matched by path leaves its old file behind; delete that one.');
+    process.exitCode = 1;
+  }
+}
+
+/** Prints the instruction-file table, in its own section: "this rule applies by path" is a different claim from a pinned skill. */
+function printInstructionRows(rows) {
+  if (rows.length === 0) return;
+  console.log('\nPath-matched instruction files (applied by file path, not chosen by the agent):');
+  printTable(rows, [
+    { header: 'FILE', value: (r) => r.file },
+    { header: 'BINDER', value: (r) => r.binder ?? '-' },
+    { header: 'SKILL', value: (r) => r.skill },
+    { header: 'PINNED', value: (r) => r.version ?? '-' },
+    { header: 'EXPECTED', value: (r) => r.currentVersion ?? '-' },
+    { header: 'STATUS', value: (r) => r.status },
+    { header: 'NOTE', value: (r) => r.note }
+  ]);
 }
