@@ -1,7 +1,18 @@
 # Bindry.Plugins
 
-Compiles a bound [Bindry](https://bindry.ai) Binder into agent skills for whichever coding agent you use — one
-plugin per platform, sharing the same compiler logic where the underlying skill format matches.
+**[Bindry](https://bindry.ai) is a package manager for AI agent skills — version controlled, CLI accessible,
+and loaded just in time.** Your skills live in Binders, and your agent takes one out at the moment the task
+calls for it, so a turn carries the instructions it needs instead of everything you own. Shorter turns, smaller
+bills. Share a Binder privately with your team, or publish it for anyone.
+
+**Pro and Team** keep Binders and skills private to your team, scan every one of them for trust and security,
+and generate skills and Binder prompts agentically instead of writing them from scratch.
+
+---
+
+This repo is how a Binder reaches your agent: it compiles a bound Binder into agent skills for whichever coding
+agent you use — one plugin per platform, sharing the same compiler logic where the underlying skill format
+matches.
 
 | Platform | Status | Docs |
 |---|---|---|

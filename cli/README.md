@@ -1,8 +1,19 @@
-# bindry — the Bindry CLI
+# bindry — a package manager for AI agent skills
 
-The terminal client for [Bindry](https://bindry.ai): search the public Library, pull a Binder into local files,
-and check whether what's on disk has drifted from what's actually published — all from a script or a shell,
-no browser required.
+**Version controlled, CLI accessible, and loaded just in time.** Your skills live in Binders, and your agent
+takes one out at the moment the task calls for it — so a turn carries the instructions it needs instead of
+everything you own. Shorter turns, smaller bills.
+
+Share a Binder privately with your team, or publish it for anyone.
+
+**Pro and Team** keep Binders and skills private to your team, scan every one of them for trust and security,
+and generate skills and Binder prompts agentically instead of writing them from scratch.
+
+---
+
+This package is the terminal client for [Bindry](https://bindry.ai): search the public Library, pull a Binder
+into local files, and check whether what's on disk has drifted from what's actually published — all from a
+script or a shell, no browser required.
 
 ## What it does
 
