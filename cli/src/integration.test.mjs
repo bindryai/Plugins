@@ -108,6 +108,11 @@ const ESCAPING_BUNDLE = {
 const EMPTY_BINDER_ID = '55555555-5555-5555-5555-555555555555';
 const EMPTY_BUNDLE = { slug: 'empty-binder', title: 'Empty Binder', skills: [], instructions: [] };
 
+// BIND-0176: the public read path is rate limited. These two stand in for a limiter that sends a
+// Retry-After and one that does not, because the CLI has to be useful either way.
+const RATE_LIMITED_BINDER_ID = '66666666-6666-6666-6666-666666666666';
+const RATE_LIMITED_NO_HEADER_BINDER_ID = '77777777-7777-7777-7777-777777777777';
+
 function startFakeApi() {
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -180,6 +185,21 @@ function startFakeApi() {
         fileName: 'escaping-conventions.json',
         content: JSON.stringify(ESCAPING_BUNDLE)
       });
+    }
+    // Shaped like the real limiter's rejection: ProblemDetails plus Retry-After in seconds.
+    if (url.pathname === `/api/binders/${RATE_LIMITED_BINDER_ID}/export`) {
+      res.writeHead(429, { 'content-type': 'application/problem+json', 'retry-after': '7' });
+      return res.end(JSON.stringify({
+        status: 429,
+        title: 'Too many requests',
+        detail: 'This endpoint allows 30 requests every 10 seconds per IP address. Retry in 7 second(s).'
+      }));
+    }
+    // A limiter, proxy or CDN that rejects without the header. The CLI still has to say something
+    // useful, so this is not a hypothetical worth skipping.
+    if (url.pathname === `/api/binders/${RATE_LIMITED_NO_HEADER_BINDER_ID}/export`) {
+      res.writeHead(429, { 'content-length': '0' });
+      return res.end();
     }
     if (url.pathname === `/api/binders/${BINDER_ID}`) {
       if (auth !== TOKEN) return json(401, { error: 'unauthorized' });
@@ -429,6 +449,46 @@ test('pull refuses an instruction path that climbs out of the working directory'
       );
       // The refusal has to mean nothing was written, not that it was written and then complained about.
       assert.ok(!existsSync(resolve(root, 'escaped.instructions.md')), 'the escaping file was written anyway');
+    });
+  });
+});
+
+// BIND-0176. A single `bindry pull` is ONE request against a 30-per-10-seconds limit, so nobody
+// reaches this by installing one Binder — it is reachable by a loop, a CI fleet, or several
+// developers behind one egress IP. In all three cases the only useful thing to say is how long to
+// wait, and before this the CLI said "request failed: 429 Too Many Requests".
+test('pull tells you how long to wait when the public read path rate-limits it', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempCwd(async (cwd) => {
+      const { pull } = await import('./commands/pull.mjs');
+      await assert.rejects(
+        () => pull({ apiBase, token: TOKEN, id: RATE_LIMITED_BINDER_ID, out: join(cwd, 'out'), target: 'skill-bundle', mode: 'pinned' }),
+        (err) => {
+          assert.match(err.message, /too many requests \(429\)/i);
+          assert.match(err.message, /Wait 7 second\(s\)/);
+          // The limiter's own sentence is worth passing through — it states the actual budget.
+          assert.match(err.message, /30 requests every 10 seconds/);
+          assert.equal(err.status, 429);
+          return true;
+        }
+      );
+    });
+  });
+});
+
+test('pull still says something useful when a 429 carries no Retry-After', async () => {
+  await withFakeApi(async (apiBase) => {
+    await withTempCwd(async (cwd) => {
+      const { pull } = await import('./commands/pull.mjs');
+      await assert.rejects(
+        () => pull({ apiBase, token: TOKEN, id: RATE_LIMITED_NO_HEADER_BINDER_ID, out: join(cwd, 'out'), target: 'skill-bundle', mode: 'pinned' }),
+        (err) => {
+          assert.match(err.message, /too many requests \(429\)/i);
+          assert.match(err.message, /Wait a few seconds/);
+          assert.equal(err.status, 429);
+          return true;
+        }
+      );
     });
   });
 });

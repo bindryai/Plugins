@@ -61,6 +61,25 @@ async function requestJson(apiBase, path, opts) {
       { status: response.status, url: response.url }
     );
   }
+  // BIND-0176: the public read path is rate limited (30 requests per 10 seconds per IP), and a
+  // rejection used to arrive here as a bare 429 — so the user was told "request failed: 429 Too
+  // Many Requests" with nothing to act on. A single `bindry pull` is one request, so nobody hits
+  // this by installing one Binder; it is reachable by a loop, a CI fleet, or several developers
+  // behind one egress IP, and in all three cases the useful information is how long to wait.
+  if (response.status === 429) {
+    const seconds = Number.parseInt(response.headers.get('retry-after') ?? '', 10);
+    const wait = Number.isFinite(seconds) && seconds > 0
+      ? `Wait ${seconds} second(s) and try again.`
+      : 'Wait a few seconds and try again.';
+    const detail = await readProblemDetail(response);
+    // The wait goes in the message rather than on the error object: nothing retries, so a
+    // structured field would be plumbing with no consumer.
+    throw new BindryApiError(
+      `too many requests (429). ${wait}${detail ? ` ${detail}` : ''}`,
+      { status: 429, url: response.url }
+    );
+  }
+
   if (!response.ok) {
     // The API answers a rejected write with ProblemDetails — a title, and a field-by-field errors
     // map. Without reading it, every validation failure reads as "400 Bad Request", which tells
