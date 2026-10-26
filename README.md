@@ -39,6 +39,18 @@ The marketplace manifests live at this repo's root, which is why every install s
   prefers this one when both exist)
 - `codex/.agents/plugins/marketplace.json` → `./codex` (Codex)
 
+## MCP Registry
+
+The remote server is listed as [`ai.bindry/bindry`](https://registry.modelcontextprotocol.io/?q=ai.bindry%2Fbindry).
+Its endpoint is `https://api.bindry.ai/api/mcp`, using streamable HTTP and a required `X-Api-Key` header.
+You need a Bindry account and a workspace API key with MCP access. Follow the
+[MCP setup guide](https://bindry.ai/plugins/mcp) before connecting.
+
+`server.json` is the registry publication manifest. Published versions are immutable: updating its
+description or setup link requires a new registry version and a separate publication. Merging a change
+here does not update the live registry. Verify the registry's latest record after publishing; do not
+assume the repository and registry agree. Registry publishing credentials belong outside this repo.
+
 ## Development
 
 `node scripts/validate.mjs` (also run in CI on every push/PR) checks that every plugin's manifests and
