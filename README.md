@@ -1,72 +1,138 @@
-# Bindry.Plugins
+# Bindry plugin for Codex CLI
 
-**[Bindry](https://bindry.ai) is a package manager for AI agent skills — version controlled, CLI accessible,
-and loaded just in time.** Your skills live in Binders, and your agent takes one out at the moment the task
-calls for it, so a turn carries the instructions it needs instead of everything you own. Shorter turns, smaller
-bills. Share a Binder privately with your team, or publish it for anyone.
+Compiles a bound Bindry Binder into Codex skills — one skill per Skill — so instructions load only when a
+task actually matches them, instead of sitting in context on every turn. Same idea as the Claude Code plugin
+in this repo, ported to Codex's actual plugin/skill mechanics.
 
-**Pro and Team** keep Binders and skills private to your team, scan every one of them for trust and security,
-and generate skills and Binder prompts agentically instead of writing them from scratch.
+## Install
 
----
-
-This repo is how a Binder reaches your agent: it compiles a bound Binder into agent skills for whichever coding
-agent you use — one plugin per platform, sharing the same compiler logic where the underlying skill format
-matches.
-
-| Platform | Status | Docs |
-|---|---|---|
-| Claude Code | Built, verified end-to-end | [claude-code/](claude-code/) |
-| Codex CLI | Built, verified end-to-end | [codex/](codex/) |
-| GitHub Copilot | Built — install verified against the real CLI; agent run and live mode not yet verified | [copilot/](copilot/) |
-| Terminal (any tool, any CI) | Built, verified end-to-end — public routes against production, private/login paths against a real workspace and key | [cli/](cli/) |
-
-Each subdirectory is a self-contained plugin for its platform — see its own README for install and usage. The
-three coding-agent plugins ship a pinned (compiled snapshot) and a live (always current via MCP) sync mode from
-one install — the user picks per Binder. `cli/` is the platform-agnostic terminal client (`npm install -g
-bindry`) — same pinned/live modes, same compiled output, for scripting, CI, or any agent without its own
-plugin.
-
-They also install **public** Binders, not just your own: pass a Library slug with no token and the compiler
-resolves it through `GET /api/public/catalog/binders/{slug-or-guid}/export/file`, which is anonymous. A key is
-only needed for private Binders. See [claude-code/README.md](claude-code/README.md#installing-someone-elses-binder).
-
-The marketplace manifests live at this repo's root, which is why every install starts with
-`<cli> plugin marketplace add bindryai/Plugins` rather than a path into a subdirectory:
-
-- `.claude-plugin/marketplace.json` → `./claude-code` (Claude Code)
-- `.github/plugin/marketplace.json` → `./copilot` (GitHub Copilot — Copilot reads the Claude manifest too, but
-  prefers this one when both exist)
-- `codex/.agents/plugins/marketplace.json` → `./codex` (Codex)
-
-## MCP Registry
-
-The remote server is listed as [`ai.bindry/bindry`](https://registry.modelcontextprotocol.io/?q=ai.bindry%2Fbindry).
-Its endpoint is `https://api.bindry.ai/api/mcp`, using streamable HTTP and a required `X-Api-Key` header.
-You need a Bindry account and a workspace API key with MCP access. Follow the
-[MCP setup guide](https://bindry.ai/plugins/mcp) before connecting.
-
-`server.json` is the registry publication manifest. Published versions are immutable: updating its
-description or setup link requires a new registry version and a separate publication. Merging a change
-here does not update the live registry. Verify the registry's latest record after publishing; do not
-assume the repository and registry agree. Registry publishing credentials belong outside this repo.
-
-## Development
-
-`node scripts/validate.mjs` (also run in CI on every push/PR) checks that every plugin's manifests and
-skill/command frontmatter are well-formed, compiles the bundled example Binders through every compiler as a
-regression smoke test, and verifies the generated script copies haven't drifted. Run it before pushing.
-
-**Editing the compiler or drift checker:** `claude-code/scripts/compile-binder.mjs` and
-`claude-code/scripts/check-drift.mjs` are the source of truth. Each plugin has to bundle its own copy —
-installed plugins live at independent, versioned cache paths per platform with no shared filesystem layout to
-import from — so after editing either one run:
+This plugin runs local Node.js scripts. It needs a local executor and is intended for Codex or local
+threads in the ChatGPT desktop app; installing it does not make those scripts run in web-only chats.
 
 ```bash
-node scripts/sync-compilers.mjs
+codex plugin marketplace add bindryai/Plugins
+codex plugin add bindry@bindry-plugins
 ```
 
-That regenerates the Codex and Copilot copies by re-applying a short, explicit list of platform deltas (output
-directory, connect-command wording) rather than a hand-patch. `validate.mjs` runs the same transform in
-check-only mode and fails if a committed copy doesn't match, so they can't silently diverge. Adding another
-platform means adding an entry to `PLATFORMS` in that script, not forking a copy by hand.
+Verified working end-to-end against the real `@openai/codex` CLI: both commands complete successfully and
+`codex plugin list` shows `bindry@bindry-plugins` as `installed, enabled`, with all three skills and both
+scripts present under the installed plugin's cache path.
+
+## Directory package
+
+The plugin manifest includes directory presentation metadata and the desktop-only declaration. From the
+repository root, run `node scripts/package-codex.mjs <new-absolute-output-directory>` to build a standalone
+bundle with its scripts, skills, icon, security policy and license at the package root. Stage newly added
+source files first: the packager copies only Git-tracked files and excludes marketplace configuration.
+ZIP the contents of that output directory for the OpenAI submission portal. Publisher verification and
+directory review remain separate from building the bundle; a ZIP alone is not a published listing.
+
+The marketplace manifest lives at `codex/.agents/plugins/marketplace.json` — this is the actual, confirmed
+location (found by testing several guesses against the real CLI; **not** `.codex-plugin/marketplace.json`,
+which is what a naive port from Claude Code's layout would suggest). The plugin manifest itself,
+`.codex-plugin/plugin.json`, points its `skills` field at `./skills/`.
+
+To try a local checkout instead of the published repo, point `marketplace add` at the repo root on disk
+(`/path/to/Bindry.Plugins`) — same two commands otherwise.
+
+## Use
+
+Bindry ships three skills, each a near-direct port of the Claude Code plugin's equivalent command — same logic,
+adapted to Codex's skill-only invocation model (Codex plugins have no separate "commands" concept; skills,
+triggered by description-matching or `$name`, are the only invokable action a plugin can expose):
+
+- **`bindry-sync`** — compile a Bindry Binder into `.agents/skills/` (Codex's project-local skills directory,
+  the equivalent of Claude Code's `.claude/skills/`). Supports the same `--mode pinned|live` split described
+  below.
+- **`bindry-check`** — read-only drift report against the already-compiled skills. Never edits or re-syncs.
+- **`bindry-connect`** — one-time, per-machine setup connecting Codex to the Bindry MCP server for live mode.
+
+## Live mode
+
+Same design as the Claude Code plugin: `--mode pinned` (default) compiles a static snapshot; `--mode live`
+compiles a pointer skill whose body tells the agent to call the Bindry MCP server's `bindry.skills.get` tool
+for current content instead of trusting anything cached. A live skill never goes stale, so `bindry-check`
+reports it as "live (always current)."
+
+Connecting to the MCP server is a deliberate, explicit opt-in via the `bindry-connect` skill — not a bundled
+`mcpServers` entry in the plugin manifest. Codex, like Claude Code, has no way to conditionally load a
+plugin-declared MCP server; bundling one would put a permanent "not connected" status in front of every
+pinned-only installer who hasn't set up an API key.
+
+```bash
+codex mcp add bindry --url <api-base>/api/mcp --bearer-token-env-var BINDRY_API_TOKEN
+```
+
+Any key generated from the workspace's team page in Bindry works here — there's no separate permission to
+grant for MCP access, and no separate token needed from pinned-mode sync. Verified live end-to-end: registered
+a real API key this way against a real running Bindry API, confirmed `codex mcp get bindry` reports it enabled,
+and confirmed (via a real independent MCP client) that `Authorization: Bearer <key>` against `/api/mcp` returns
+real tool results — this required a small fix upstream in IBeam's default JWT scheme, which was previously
+intercepting any non-JWT Bearer value before the API-key scheme got a chance; see the Bindry-API changelog for
+that fix's own verification.
+
+## Try it right now, without Codex
+
+The compiler is the same plain, dependency-free Node script as the Claude Code plugin, just defaulting to a
+different output directory:
+
+```bash
+# from a local export file
+node scripts/compile-binder.mjs examples/git-flow-command-center.binder.json
+
+# a Skill with an attachment (logo file)
+node scripts/compile-binder.mjs examples/brand-guidelines.binder.json
+
+# live, from a running Bindry API
+node scripts/compile-binder.mjs <binder-id> --api-base http://localhost:5160 --token <api-key> --out .agents/skills
+```
+
+Verified against a real running Bindry API: output for the bundled examples is byte-identical to what the
+Claude Code compiler produces for the same input (frontmatter, pin/live comment, body, assets — only the output
+directory differs), and a full live round-trip (seed a Binder + Skill, compile pinned and live, edit the
+Skill's content, re-fetch live and see the new content immediately) was verified the same way it was for the
+Claude Code plugin.
+
+## Current limitations
+
+- `--mode live` requires real GUID Skill ids from a live-fetched Binder — the bundled
+  `examples/*.binder.json` files use illustrative ids (e.g. `bnd_git_branch_pr_hygiene`), not real GUIDs, so
+  those Skills are skipped with a warning rather than compiling a skill that would always fail.
+- Attachments are still downloaded and pinned to disk at compile time even in live mode — the live MCP tool
+  returns a Skill's text content only, not its file attachments.
+- `/api/binders/{id}/export` is workspace-scoped, same as the Claude Code plugin — "sync your own Binders," not
+  "install someone else's published Binder."
+- Codex skills have no structured "prefer tool X" mechanism beyond the prose in the skill body itself (confirmed
+  against a real OpenAI-authored plugin already installed on this machine) — a live skill's instruction to call
+  the MCP tool is exactly that: an instruction, not an enforced constraint.
+
+## Compiled skills need to be readable, and a failure here is nearly silent
+
+Codex reads each `SKILL.md` **twice**, and both reads have to succeed for a skill to do anything:
+
+1. **At session start**, Codex itself reads every `.agents/skills/**/SKILL.md` to build the list of skills the
+   model is offered — name, description, path.
+2. **During a turn**, the model reads the body of the skill it chose, with an ordinary shell command
+   (`Get-Content` / `cat`) against that path. There is no skill tool in Codex's event stream; the body arrives
+   this way or not at all.
+
+So a compiled skill is unavailable if **either** Codex cannot read the file at startup, **or** the agent's shell
+is sandboxed such that it cannot read the workspace during the turn. `codex exec -s read-only` is sufficient —
+read-only permits reads — but a stricter sandbox would not be.
+
+**The failure is almost invisible.** Observed directly (BIND-0264): with one `SKILL.md` made unreadable, Codex
+emitted a single line to **stderr** —
+
+```
+ERROR codex_core::session::session: failed to load skill …\bulletin-protocol\SKILL.md: failed to read file: Access is denied. (os error 5)
+```
+
+— and then ran the turn normally. The skill was simply absent: it was never offered, never mentioned, and the
+answer was written from general knowledge. Nothing in the response, and nothing on stdout, indicated that a
+skill had been expected and lost. If you redirect or ignore stderr, there is no signal at all.
+
+**The always-on block is unaffected.** In the same run the `AGENTS.md` preamble was still honoured in full, so
+a Binder can be half-working — persona applied, skills silently missing — which looks like the Binder working.
+
+If skills seem to be doing nothing on Codex, check stderr for that line before anything else. A malformed
+`SKILL.md` fails the same way, for the same reason, with `missing YAML frontmatter delimited by ---`.
