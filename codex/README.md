@@ -6,6 +6,9 @@ in this repo, ported to Codex's actual plugin/skill mechanics.
 
 ## Install
 
+This plugin runs local Node.js scripts. It needs a local executor and is intended for Codex or local
+threads in the ChatGPT desktop app; installing it does not make those scripts run in web-only chats.
+
 ```bash
 codex plugin marketplace add bindryai/Plugins
 codex plugin add bindry@bindry-plugins
@@ -14,6 +17,15 @@ codex plugin add bindry@bindry-plugins
 Verified working end-to-end against the real `@openai/codex` CLI: both commands complete successfully and
 `codex plugin list` shows `bindry@bindry-plugins` as `installed, enabled`, with all three skills and both
 scripts present under the installed plugin's cache path.
+
+## Directory package
+
+The plugin manifest includes directory presentation metadata and the desktop-only declaration. From the
+repository root, run `node scripts/package-codex.mjs <new-absolute-output-directory>` to build a standalone
+bundle with its scripts, skills, icon, security policy and license at the package root. Stage newly added
+source files first: the packager copies only Git-tracked files and excludes marketplace configuration.
+ZIP the contents of that output directory for the OpenAI submission portal. Publisher verification and
+directory review remain separate from building the bundle; a ZIP alone is not a published listing.
 
 The marketplace manifest lives at `codex/.agents/plugins/marketplace.json` — this is the actual, confirmed
 location (found by testing several guesses against the real CLI; **not** `.codex-plugin/marketplace.json`,
